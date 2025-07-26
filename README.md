@@ -1,4 +1,4 @@
-# 🔍 Scout
+# 🦅 Scout
 
 A lightning-fast TUI file explorer and fuzzy finder for developers. Navigate, search, and preview files with ease.
 
@@ -9,7 +9,7 @@ A lightning-fast TUI file explorer and fuzzy finder for developers. Navigate, se
 - **🔀 Git Integration** - Shows modified files in your repository  
 - **📁 Smart Navigation** - Keyboard-driven interface with vim-like controls
 - **🎯 Quick Actions** - Open, edit, copy path with single keystrokes
-- **💻 VS Code Integration** - Open files/directories as VS Code workspaces with 'o' key
+- **💻 VS Code Integration** - Open files/directories as VS Code workspaces with 'o' key [easily configurable to another editor]
 - **📐 Responsive Design** - Automatically fits terminal size with scrollable windows
 - **🏷️ File Icons** - Visual file type indicators for quick recognition
 - **📌 Smart Bookmarks** - Save and manage frequently accessed directories
@@ -227,20 +227,3 @@ Scout is designed to be fast:
 - **Space optimization**: Hide preview with `p` for more file list space in narrow terminals
 - **Bookmark workflow**: Bookmark project roots, then use `b` → `o` for instant VS Code access
 - **Status bar**: Watch the status bar for file info and keyboard shortcuts
-
-## Current Limitations
-
-- Search only works within current directory (not recursive)
-- No file operations (copy, move, delete files)
-- No multiple file selection
-- No image preview (terminal limitation)
-- No customizable keybindings
-
-## Future Ideas
-
-- Recursive file search with ripgrep integration
-- Basic file operations (create, copy, move, delete)
-- Multiple file selection with bulk operations
-- Customizable themes and keybindings
-- Plugin system for external tool integration
-- Session management and workspace restoration
