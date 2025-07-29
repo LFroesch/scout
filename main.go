@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -17,6 +18,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+type statusMsg struct {
+	message  string
+	duration time.Duration
+}
+
 type mode int
 
 const (
@@ -25,6 +31,9 @@ const (
 	modePreview
 	modeBookmarks
 	modeConfirmDelete
+	modeConfirmCopy
+	modeConfirmDeleteFile
+	modeConfirmPaste
 )
 
 type fileItem struct {
@@ -37,10 +46,11 @@ type fileItem struct {
 }
 
 type Config struct {
-	RootPath       string   `json:"root_path"`
-	Bookmarks      []string `json:"bookmarks"`
-	ShowHidden     bool     `json:"show_hidden"`
-	PreviewEnabled bool     `json:"preview_enabled"`
+	RootPath           string   `json:"root_path"`
+	Bookmarks          []string `json:"bookmarks"`
+	ShowHidden         bool     `json:"show_hidden"`
+	PreviewEnabled     bool     `json:"preview_enabled"`
+	PreviewMaxLines    int      `json:"preview_max_lines"`
 }
 
 type model struct {
@@ -52,7 +62,10 @@ type model struct {
 	scrollOffset        int
 	previewScroll       int
 	bookmarksCursor     int
-	deleteBookmarkIndex int // Index of bookmark to delete
+	deleteBookmarkIndex int    // Index of bookmark to delete
+	operationFilePath   string // Path of file for current operation
+	copiedFilePath      string // Path of copied file for paste operation
+	isCutOperation      bool   // Whether the copied file should be moved instead of copied
 	searchInput         textinput.Model
 	width               int
 	height              int
@@ -302,7 +315,10 @@ func (m *model) previewFile(path string) string {
 	}
 
 	lines := strings.Split(string(content), "\n")
-	maxLines := 30
+	maxLines := m.config.PreviewMaxLines
+	if maxLines <= 0 {
+		maxLines = 100 // fallback default
+	}
 	if len(lines) > maxLines {
 		lines = lines[:maxLines]
 		preview.WriteString(fmt.Sprintf("%s\n...\n(Showing first %d lines)", strings.Join(lines, "\n"), maxLines))
@@ -329,6 +345,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, nil
+
+	case statusMsg:
+		m.statusMsg = msg.message
+		m.statusExpiry = time.Now().Add(msg.duration)
+		m.mode = modeNormal
+		m.loadFiles() // Refresh file list after operations
 		return m, nil
 
 	case tea.KeyMsg:
@@ -399,6 +422,43 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "n", "N", "esc":
 				// Cancelled
 				m.mode = modeBookmarks
+				return m, nil
+			}
+			return m, nil
+
+		case modeConfirmCopy:
+			switch msg.String() {
+			case "y", "Y":
+				// Confirmed - copy the file
+				return m, m.copyFile(m.operationFilePath)
+			case "n", "N", "esc":
+				// Cancelled
+				m.mode = modeNormal
+				return m, nil
+			}
+			return m, nil
+
+
+		case modeConfirmDeleteFile:
+			switch msg.String() {
+			case "y", "Y":
+				// Confirmed - delete the file
+				return m, m.deleteFile(m.operationFilePath)
+			case "n", "N", "esc":
+				// Cancelled
+				m.mode = modeNormal
+				return m, nil
+			}
+			return m, nil
+
+		case modeConfirmPaste:
+			switch msg.String() {
+			case "y", "Y":
+				// Confirmed - paste the file
+				return m, m.pasteFile(m.operationFilePath)
+			case "n", "N", "esc":
+				// Cancelled
+				m.mode = modeNormal
 				return m, nil
 			}
 			return m, nil
@@ -585,6 +645,50 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.statusExpiry = time.Now().Add(2 * time.Second)
 					}
 				}
+			
+			case "C":
+				// Copy file
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					selected := m.filteredFiles[m.cursor]
+					if selected.name != ".." {
+						m.copiedFilePath = selected.path
+						m.isCutOperation = false
+						m.statusMsg = fmt.Sprintf("Copied: %s (press V to paste)", filepath.Base(selected.path))
+						m.statusExpiry = time.Now().Add(2 * time.Second)
+					}
+				}
+
+			case "x":
+				// Cut file
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					selected := m.filteredFiles[m.cursor]
+					if selected.name != ".." {
+						m.copiedFilePath = selected.path
+						m.isCutOperation = true
+						m.statusMsg = fmt.Sprintf("Cut: %s (press V to paste)", filepath.Base(selected.path))
+						m.statusExpiry = time.Now().Add(2 * time.Second)
+					}
+				}
+
+			case "D":
+				// Delete file
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					selected := m.filteredFiles[m.cursor]
+					if selected.name != ".." {
+						m.operationFilePath = selected.path
+						m.mode = modeConfirmDeleteFile
+					}
+				}
+
+			case "V":
+				// Paste copied file
+				if m.copiedFilePath != "" {
+					m.operationFilePath = m.copiedFilePath
+					m.mode = modeConfirmPaste
+				} else {
+					m.statusMsg = "No file copied to paste"
+					m.statusExpiry = time.Now().Add(2 * time.Second)
+				}
 			}
 		}
 	}
@@ -610,6 +714,15 @@ func (m model) View() string {
 	} else if m.mode == modeConfirmDelete {
 		// Confirmation dialog overlay
 		mainContent = m.renderConfirmDeleteView()
+	} else if m.mode == modeConfirmCopy {
+		// Copy confirmation dialog
+		mainContent = m.renderConfirmFileOperationView("Copy", "copy")
+	} else if m.mode == modeConfirmDeleteFile {
+		// Delete file confirmation dialog
+		mainContent = m.renderConfirmFileOperationView("Delete", "delete")
+	} else if m.mode == modeConfirmPaste {
+		// Paste confirmation dialog
+		mainContent = m.renderConfirmFileOperationView("Paste", "paste")
 	} else if m.showPreview {
 		// Split view
 		fileList := m.renderFileList(m.width / 2)
@@ -930,6 +1043,76 @@ func (m model) renderConfirmDeleteView() string {
 	return dialogBox
 }
 
+func (m model) renderConfirmFileOperationView(operation, actionType string) string {
+	// Create a centered dialog box
+	dialogWidth := 60
+	dialogHeight := 8
+
+	fileName := filepath.Base(m.operationFilePath)
+
+	// Choose color based on operation
+	var borderColor lipgloss.Color
+	var icon string
+	switch actionType {
+	case "copy":
+		borderColor = lipgloss.Color("33") // Blue
+		icon = "📋"
+	case "move":
+		borderColor = lipgloss.Color("214") // Orange
+		icon = "📁"
+	case "delete":
+		borderColor = lipgloss.Color("196") // Red  
+		icon = "🗑️"
+	case "paste":
+		borderColor = lipgloss.Color("46") // Green
+		icon = "📥"
+	default:
+		borderColor = lipgloss.Color("246") // Gray
+		icon = "❓"
+	}
+
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Width(dialogWidth).
+		Height(dialogHeight).
+		Padding(1).
+		Align(lipgloss.Center)
+
+	// Dialog content
+	var dialogContent []string
+
+	dialogContent = append(dialogContent, fmt.Sprintf("%s  Confirm %s", icon, operation))
+	dialogContent = append(dialogContent, "")
+	
+	if actionType == "copy" {
+		dialogContent = append(dialogContent, fmt.Sprintf("Copy '%s' to current directory?", fileName))
+	} else if actionType == "move" {
+		dialogContent = append(dialogContent, fmt.Sprintf("Move '%s' to current directory?", fileName))
+	} else if actionType == "delete" {
+		dialogContent = append(dialogContent, fmt.Sprintf("Delete '%s' permanently?", fileName))
+		dialogContent = append(dialogContent, "⚠️  This action cannot be undone!")
+	} else if actionType == "paste" {
+		dialogContent = append(dialogContent, fmt.Sprintf("Paste '%s' to current directory?", fileName))
+	}
+	
+	dialogContent = append(dialogContent, "")
+
+	confirmText := fmt.Sprintf("%s Yes  %s No  %s Cancel",
+		lipgloss.NewStyle().Foreground(lipgloss.Color("46")).Render("y"),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("n"),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("246")).Render("esc"))
+
+	dialogContent = append(dialogContent, confirmText)
+
+	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
+
+	// Center the dialog on screen
+	dialogBox := lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+
+	return dialogBox
+}
+
 func (m model) renderStatusBar() string {
 	statusStyle := lipgloss.NewStyle().
 		Background(lipgloss.Color("235")).
@@ -975,16 +1158,18 @@ func (m model) renderStatusBar() string {
 		helpPlainText = "↑↓: navigate • enter: go • o: vscode • d: delete • esc: exit"
 	} else {
 		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-		help = fmt.Sprintf("%s navigate • %s search • %s open • %s vscode • %s bookmarks • %s add bookmark • %s back • %s preview",
+		help = fmt.Sprintf("%s navigate • %s search • %s open • %s vscode • %s copy • %s cut • %s paste • %s delete • %s bookmarks • %s preview",
 			keyStyle.Render("↑↓:"),
 			keyStyle.Render("/:"),
 			keyStyle.Render("enter:"),
 			keyStyle.Render("o:"),
+			keyStyle.Render("C:"),
+			keyStyle.Render("x:"),
+			keyStyle.Render("V:"),
+			keyStyle.Render("D:"),
 			keyStyle.Render("b:"),
-			keyStyle.Render("B:"),
-			keyStyle.Render("esc:"),
 			keyStyle.Render("p:"))
-		helpPlainText = "↑↓: navigate • /: search • enter: open • o: vscode • b: bookmarks • B: add bookmark • esc: back • p: preview"
+		helpPlainText = "↑↓: navigate • /: search • enter: open • o: vscode • C: copy • x: cut • V: paste • D: delete • b: bookmarks • p: preview"
 	}
 
 	// Combine sections - use fixed widths to avoid overlap
@@ -1089,6 +1274,176 @@ func (m *model) copyPath(path string) {
 			m.statusExpiry = time.Now().Add(2 * time.Second)
 		}
 	}
+}
+
+func (m *model) copyFile(sourcePath string) tea.Cmd {
+	return func() tea.Msg {
+		fileName := filepath.Base(sourcePath)
+		destPath := filepath.Join(m.currentDir, "copy_of_"+fileName)
+		
+		// Check if destination already exists and create a unique name
+		counter := 1
+		for {
+			if _, err := os.Stat(destPath); os.IsNotExist(err) {
+				break
+			}
+			ext := filepath.Ext(fileName)
+			nameWithoutExt := strings.TrimSuffix(fileName, ext)
+			destPath = filepath.Join(m.currentDir, fmt.Sprintf("copy_of_%s_%d%s", nameWithoutExt, counter, ext))
+			counter++
+		}
+		
+		err := copyFileOrDir(sourcePath, destPath)
+		if err != nil {
+			return statusMsg{fmt.Sprintf("Copy failed: %v", err), 3 * time.Second}
+		}
+		
+		return statusMsg{fmt.Sprintf("Copied to: %s", filepath.Base(destPath)), 2 * time.Second}
+	}
+}
+
+
+func (m *model) deleteFile(filePath string) tea.Cmd {
+	return func() tea.Msg {
+		fileName := filepath.Base(filePath)
+		
+		err := os.RemoveAll(filePath)
+		if err != nil {
+			return statusMsg{fmt.Sprintf("Delete failed: %v", err), 3 * time.Second}
+		}
+		
+		return statusMsg{fmt.Sprintf("Deleted: %s", fileName), 2 * time.Second}
+	}
+}
+
+func (m *model) pasteFile(sourcePath string) tea.Cmd {
+	return func() tea.Msg {
+		fileName := filepath.Base(sourcePath)
+		destPath := filepath.Join(m.currentDir, fileName)
+		
+		var err error
+		var operation string
+		
+		if m.isCutOperation {
+			// Move operation (cut)
+			// Check if destination already exists and create a unique name
+			if _, statErr := os.Stat(destPath); !os.IsNotExist(statErr) && destPath != sourcePath {
+				counter := 1
+				for {
+					ext := filepath.Ext(fileName)
+					nameWithoutExt := strings.TrimSuffix(fileName, ext)
+					destPath = filepath.Join(m.currentDir, fmt.Sprintf("%s_%d%s", nameWithoutExt, counter, ext))
+					if _, err := os.Stat(destPath); os.IsNotExist(err) {
+						break
+					}
+					counter++
+				}
+			}
+			
+			err = os.Rename(sourcePath, destPath)
+			operation = "Moved"
+			
+			// Clear the cut operation after successful move
+			if err == nil {
+				m.copiedFilePath = ""
+				m.isCutOperation = false
+			}
+		} else {
+			// Copy operation
+			// Check if destination already exists and create a unique name
+			counter := 1
+			for {
+				if _, statErr := os.Stat(destPath); os.IsNotExist(statErr) {
+					break
+				}
+				ext := filepath.Ext(fileName)
+				nameWithoutExt := strings.TrimSuffix(fileName, ext)
+				destPath = filepath.Join(m.currentDir, fmt.Sprintf("%s_copy_%d%s", nameWithoutExt, counter, ext))
+				counter++
+			}
+			
+			err = copyFileOrDir(sourcePath, destPath)
+			operation = "Pasted"
+		}
+		
+		if err != nil {
+			return statusMsg{fmt.Sprintf("%s failed: %v", operation, err), 3 * time.Second}
+		}
+		
+		return statusMsg{fmt.Sprintf("%s: %s", operation, filepath.Base(destPath)), 2 * time.Second}
+	}
+}
+
+func copyFileOrDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	
+	if srcInfo.IsDir() {
+		return copyDir(src, dst)
+	} else {
+		return copyFileTo(src, dst)
+	}
+}
+
+func copyFileTo(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+	
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+	
+	_, err = io.Copy(destFile, sourceFile)
+	if err != nil {
+		return err
+	}
+	
+	// Copy file permissions
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	return os.Chmod(dst, srcInfo.Mode())
+}
+
+func copyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	
+	err = os.MkdirAll(dst, srcInfo.Mode())
+	if err != nil {
+		return err
+	}
+	
+	files, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	
+	for _, file := range files {
+		srcPath := filepath.Join(src, file.Name())
+		dstPath := filepath.Join(dst, file.Name())
+		
+		if file.IsDir() {
+			err = copyDir(srcPath, dstPath)
+		} else {
+			err = copyFileTo(srcPath, dstPath)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	
+	return nil
 }
 
 func getFileIcon(name string) string {
@@ -1278,10 +1633,11 @@ func loadConfig() *Config {
 	// Default config with root path as first bookmark
 	rootPath := filepath.Join(homeDir)
 	defaultConfig := &Config{
-		RootPath:       rootPath,
-		Bookmarks:      []string{rootPath},
-		ShowHidden:     false,
-		PreviewEnabled: true,
+		RootPath:        rootPath,
+		Bookmarks:       []string{rootPath},
+		ShowHidden:      false,
+		PreviewEnabled:  true,
+		PreviewMaxLines: 100,
 	}
 
 	// Try to load existing config
