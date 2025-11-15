@@ -92,10 +92,6 @@ func initialModel() model {
 	ti.Placeholder = "Type to search..."
 	ti.CharLimit = 256
 	ti.Width = 50
-	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Background(lipgloss.Color("235"))
-	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Background(lipgloss.Color("235"))
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Background(lipgloss.Color("235"))
-	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Background(lipgloss.Color("235"))
 
 	m := model{
 		mode:            modeNormal,
@@ -825,13 +821,6 @@ func (m model) renderHeader() string {
 		title = "🔍 Scout - Bookmarks (ESC to exit)"
 	} else {
 		title = fmt.Sprintf("🔍 Scout - %s", m.currentDir)
-		// Add git branch if available
-		if m.gitBranch != "" {
-			branchStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("141")).
-				Bold(true)
-			title += " " + branchStyle.Render(fmt.Sprintf("(%s)", m.gitBranch))
-		}
 	}
 
 	if m.mode == modeSearch {
