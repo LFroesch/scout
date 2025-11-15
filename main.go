@@ -830,21 +830,15 @@ func (m model) renderHeader() string {
 			Foreground(lipgloss.Color("226")).
 			Padding(0, 1)
 
-		// Build search text with mode indicator and hint
+		// Build search text with mode indicator
 		searchLabel := "Search: "
-		searchHint := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
-			Render("(ctrl+r)")
 
 		if m.recursiveSearch {
 			searchLabel = "Search [RECURSIVE]: "
-			searchHint = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("240")).
-				Render("(ctrl+r)")
 		}
 
-		// Combine label, input, and hint
-		searchText := searchLabel + m.searchInput.View() + " " + searchHint
+		// Combine label and input
+		searchText := searchLabel + m.searchInput.View()
 
 		// Calculate available width for title
 		searchWidth := lipgloss.Width(searchText) + 2 // +2 for padding
