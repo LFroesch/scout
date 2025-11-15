@@ -19,11 +19,6 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
-type statusMsg struct {
-	message  string
-	duration time.Duration
-}
-
 type mode int
 
 const (
@@ -32,9 +27,6 @@ const (
 	modePreview
 	modeBookmarks
 	modeConfirmDelete
-	modeConfirmCopy
-	modeConfirmDeleteFile
-	modeConfirmPaste
 )
 
 type fileItem struct {
@@ -65,10 +57,7 @@ type model struct {
 	scrollOffset        int
 	previewScroll       int
 	bookmarksCursor     int
-	deleteBookmarkIndex int    // Index of bookmark to delete
-	operationFilePath   string // Path of file for current operation
-	copiedFilePath      string // Path of copied file for paste operation
-	isCutOperation      bool   // Whether the copied file should be moved instead of copied
+	deleteBookmarkIndex int // Index of bookmark to delete
 	searchInput         textinput.Model
 	width               int
 	height              int
@@ -412,10 +401,7 @@ func (m *model) previewFile(path string) string {
 	}
 
 	lines := strings.Split(string(content), "\n")
-	maxLines := m.config.PreviewMaxLines
-	if maxLines <= 0 {
-		maxLines = 100 // fallback default
-	}
+	maxLines := 30
 	if len(lines) > maxLines {
 		lines = lines[:maxLines]
 		preview.WriteString(fmt.Sprintf("%s\n...\n(Showing first %d lines)", strings.Join(lines, "\n"), maxLines))
@@ -442,13 +428,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		return m, nil
-
-	case statusMsg:
-		m.statusMsg = msg.message
-		m.statusExpiry = time.Now().Add(msg.duration)
-		m.mode = modeNormal
-		m.loadFiles() // Refresh file list after operations
 		return m, nil
 
 	case tea.KeyMsg:
@@ -521,42 +500,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "n", "N", "esc":
 				// Cancelled
 				m.mode = modeBookmarks
-				return m, nil
-			}
-			return m, nil
-
-		case modeConfirmCopy:
-			switch msg.String() {
-			case "y", "Y":
-				// Confirmed - copy the file
-				return m, m.copyFile(m.operationFilePath)
-			case "n", "N", "esc":
-				// Cancelled
-				m.mode = modeNormal
-				return m, nil
-			}
-			return m, nil
-
-		case modeConfirmDeleteFile:
-			switch msg.String() {
-			case "y", "Y":
-				// Confirmed - delete the file
-				return m, m.deleteFile(m.operationFilePath)
-			case "n", "N", "esc":
-				// Cancelled
-				m.mode = modeNormal
-				return m, nil
-			}
-			return m, nil
-
-		case modeConfirmPaste:
-			switch msg.String() {
-			case "y", "Y":
-				// Confirmed - paste the file
-				return m, m.pasteFile(m.operationFilePath)
-			case "n", "N", "esc":
-				// Cancelled
-				m.mode = modeNormal
 				return m, nil
 			}
 			return m, nil
@@ -841,50 +784,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.statusExpiry = time.Now().Add(2 * time.Second)
 					}
 				}
-
-			case "C":
-				// Copy file
-				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
-					selected := m.filteredFiles[m.cursor]
-					if selected.name != ".." {
-						m.copiedFilePath = selected.path
-						m.isCutOperation = false
-						m.statusMsg = fmt.Sprintf("Copied: %s (press V to paste)", filepath.Base(selected.path))
-						m.statusExpiry = time.Now().Add(2 * time.Second)
-					}
-				}
-
-			case "x":
-				// Cut file
-				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
-					selected := m.filteredFiles[m.cursor]
-					if selected.name != ".." {
-						m.copiedFilePath = selected.path
-						m.isCutOperation = true
-						m.statusMsg = fmt.Sprintf("Cut: %s (press V to paste)", filepath.Base(selected.path))
-						m.statusExpiry = time.Now().Add(2 * time.Second)
-					}
-				}
-
-			case "D":
-				// Delete file
-				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
-					selected := m.filteredFiles[m.cursor]
-					if selected.name != ".." {
-						m.operationFilePath = selected.path
-						m.mode = modeConfirmDeleteFile
-					}
-				}
-
-			case "V":
-				// Paste copied file
-				if m.copiedFilePath != "" {
-					m.operationFilePath = m.copiedFilePath
-					m.mode = modeConfirmPaste
-				} else {
-					m.statusMsg = "No file copied to paste"
-					m.statusExpiry = time.Now().Add(2 * time.Second)
-				}
 			}
 		}
 	}
@@ -910,15 +809,6 @@ func (m model) View() string {
 	} else if m.mode == modeConfirmDelete {
 		// Confirmation dialog overlay
 		mainContent = m.renderConfirmDeleteView()
-	} else if m.mode == modeConfirmCopy {
-		// Copy confirmation dialog
-		mainContent = m.renderConfirmFileOperationView("Copy", "copy")
-	} else if m.mode == modeConfirmDeleteFile {
-		// Delete file confirmation dialog
-		mainContent = m.renderConfirmFileOperationView("Delete", "delete")
-	} else if m.mode == modeConfirmPaste {
-		// Paste confirmation dialog
-		mainContent = m.renderConfirmFileOperationView("Paste", "paste")
 	} else if m.showPreview {
 		// Split view
 		fileList := m.renderFileList(m.width / 2)
@@ -1334,76 +1224,6 @@ func (m model) renderConfirmDeleteView() string {
 	return dialogBox
 }
 
-func (m model) renderConfirmFileOperationView(operation, actionType string) string {
-	// Create a centered dialog box
-	dialogWidth := 60
-	dialogHeight := 8
-
-	fileName := filepath.Base(m.operationFilePath)
-
-	// Choose color based on operation
-	var borderColor lipgloss.Color
-	var icon string
-	switch actionType {
-	case "copy":
-		borderColor = lipgloss.Color("33") // Blue
-		icon = "📋"
-	case "move":
-		borderColor = lipgloss.Color("214") // Orange
-		icon = "📁"
-	case "delete":
-		borderColor = lipgloss.Color("196") // Red
-		icon = "🗑️"
-	case "paste":
-		borderColor = lipgloss.Color("46") // Green
-		icon = "📥"
-	default:
-		borderColor = lipgloss.Color("246") // Gray
-		icon = "❓"
-	}
-
-	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Width(dialogWidth).
-		Height(dialogHeight).
-		Padding(1).
-		Align(lipgloss.Center)
-
-	// Dialog content
-	var dialogContent []string
-
-	dialogContent = append(dialogContent, fmt.Sprintf("%s  Confirm %s", icon, operation))
-	dialogContent = append(dialogContent, "")
-
-	if actionType == "copy" {
-		dialogContent = append(dialogContent, fmt.Sprintf("Copy '%s' to current directory?", fileName))
-	} else if actionType == "move" {
-		dialogContent = append(dialogContent, fmt.Sprintf("Move '%s' to current directory?", fileName))
-	} else if actionType == "delete" {
-		dialogContent = append(dialogContent, fmt.Sprintf("Delete '%s' permanently?", fileName))
-		dialogContent = append(dialogContent, "⚠️  This action cannot be undone!")
-	} else if actionType == "paste" {
-		dialogContent = append(dialogContent, fmt.Sprintf("Paste '%s' to current directory?", fileName))
-	}
-
-	dialogContent = append(dialogContent, "")
-
-	confirmText := fmt.Sprintf("%s Yes  %s No  %s Cancel",
-		lipgloss.NewStyle().Foreground(lipgloss.Color("46")).Render("y"),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("n"),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("246")).Render("esc"))
-
-	dialogContent = append(dialogContent, confirmText)
-
-	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-
-	// Center the dialog on screen
-	dialogBox := lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
-
-	return dialogBox
-}
-
 func (m model) renderStatusBar() string {
 	statusStyle := lipgloss.NewStyle().
 		Background(lipgloss.Color("235")).
@@ -1454,11 +1274,9 @@ func (m model) renderStatusBar() string {
 			keyStyle.Render("/:"),
 			keyStyle.Render("enter:"),
 			keyStyle.Render("o:"),
-			keyStyle.Render("C:"),
-			keyStyle.Render("x:"),
-			keyStyle.Render("V:"),
-			keyStyle.Render("D:"),
 			keyStyle.Render("b:"),
+			keyStyle.Render("B:"),
+			keyStyle.Render("esc:"),
 			keyStyle.Render("p:"))
 		helpPlainText = "↑↓[]: navigate • /: search • enter: open • o: vscode • b: bookmarks • B: add bookmark • esc: back • p: preview"
 	}
