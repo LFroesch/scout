@@ -92,6 +92,9 @@ func initialModel() model {
 	ti.Placeholder = "Type to search..."
 	ti.CharLimit = 256
 	ti.Width = 50
+	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("226"))
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
 
 	m := model{
 		mode:            modeNormal,
@@ -607,37 +610,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.updatePreview()
 
-			case "alt+left":
-				// Go back in history
-				if m.historyIndex > 0 {
-					m.historyIndex--
-					m.currentDir = m.dirHistory[m.historyIndex]
-					m.cursor = 0
-					m.scrollOffset = 0
-					m.previewScroll = 0
-					m.loadFiles()
-					m.gitModified = getGitModifiedFiles(m.currentDir)
-					m.gitBranch = getGitBranch(m.currentDir)
-					m.statusMsg = "⬅️ Back"
-					m.statusExpiry = time.Now().Add(1 * time.Second)
-				}
-
-			case "alt+right":
-				// Go forward in history
-				if m.historyIndex < len(m.dirHistory)-1 {
-					m.historyIndex++
-					m.currentDir = m.dirHistory[m.historyIndex]
-					m.cursor = 0
-					m.scrollOffset = 0
-					m.previewScroll = 0
-					m.loadFiles()
-					m.gitModified = getGitModifiedFiles(m.currentDir)
-					m.gitBranch = getGitBranch(m.currentDir)
-					m.statusMsg = "➡️ Forward"
-					m.statusExpiry = time.Now().Add(1 * time.Second)
-				}
-
-			case "ctrl+s", "ctrl+down":
+			case "ctrl+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
 					availableHeight := m.height - 8
@@ -653,7 +626,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-			case "ctrl+w", "ctrl+up":
+			case "ctrl+up":
 				// Scroll preview up
 				if m.showPreview && m.previewScroll > 0 {
 					m.previewScroll--
@@ -861,19 +834,35 @@ func (m model) renderHeader() string {
 	}
 
 	if m.mode == modeSearch {
-		searchStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("226")).
+		// Create search section with matching background
+		searchContainerStyle := lipgloss.NewStyle().
 			Background(lipgloss.Color("235")).
+			Foreground(lipgloss.Color("226")).
 			Padding(0, 1)
 
-		searchMode := ""
+		// Build search text with mode indicator and hint
+		searchLabel := "Search: "
+		searchHint := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Render("(ctrl+r: toggle recursive)")
+
 		if m.recursiveSearch {
-			searchMode = " [RECURSIVE]"
+			searchLabel = "Search [RECURSIVE]: "
 		}
-		search := fmt.Sprintf("Search%s: %s", searchMode, m.searchInput.View())
+
+		// Combine label, input, and hint
+		searchText := searchLabel + m.searchInput.View() + " " + searchHint
+
+		// Calculate available width for title
+		searchWidth := lipgloss.Width(searchText) + 2 // +2 for padding
+		titleWidth := m.width - searchWidth
+		if titleWidth < 20 {
+			titleWidth = 20
+		}
+
 		title = lipgloss.JoinHorizontal(lipgloss.Top,
-			titleStyle.Width(m.width-len(search)-4).Render(title),
-			searchStyle.Render(search),
+			titleStyle.Width(titleWidth).Render(title),
+			searchContainerStyle.Render(searchText),
 		)
 	}
 
@@ -1038,11 +1027,11 @@ func (m model) renderPreview(width int) string {
 	// Add scroll indicators
 	var content []string
 	if startLine > 0 {
-		content = append(content, "▲ Scroll up with Ctrl+W")
+		content = append(content, "▲ Scroll up with Ctrl+↑")
 	}
 	content = append(content, visibleLines...)
 	if endLine < len(m.previewLines) {
-		content = append(content, "▼ Scroll down with Ctrl+S")
+		content = append(content, "▼ Scroll down with Ctrl+↓")
 	}
 
 	return previewStyle.Render(strings.Join(content, "\n"))
