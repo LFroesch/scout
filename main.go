@@ -3,8 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"io/ioutil"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -13,9 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sahilm/fuzzy"
 )
 
 type statusMsg struct {
@@ -46,11 +47,13 @@ type fileItem struct {
 }
 
 type Config struct {
-	RootPath           string   `json:"root_path"`
-	Bookmarks          []string `json:"bookmarks"`
-	ShowHidden         bool     `json:"show_hidden"`
-	PreviewEnabled     bool     `json:"preview_enabled"`
-	PreviewMaxLines    int      `json:"preview_max_lines"`
+	RootPath       string            `json:"root_path"`
+	Bookmarks      []string          `json:"bookmarks"`
+	ShowHidden     bool              `json:"show_hidden"`
+	PreviewEnabled bool              `json:"preview_enabled"`
+	Editor         string            `json:"editor"`
+	Frecency       map[string]int    `json:"frecency"`
+	LastVisited    map[string]string `json:"last_visited"` // path -> timestamp
 }
 
 type model struct {
@@ -75,8 +78,14 @@ type model struct {
 	previewLines        []string
 	config              *Config
 	gitModified         map[string]bool
+	gitBranch           string
 	statusMsg           string
 	statusExpiry        time.Time
+	dirHistory          []string // Navigation history
+	historyIndex        int      // Current position in history
+	recursiveSearch     bool     // Toggle for recursive vs current dir search
+	loading             bool     // Loading indicator
+	searchMatches       [][]int  // Character positions that matched in fuzzy search
 }
 
 func initialModel() model {
@@ -109,6 +118,12 @@ func initialModel() model {
 		showPreview:     config.PreviewEnabled,
 		config:          config,
 		gitModified:     getGitModifiedFiles(currentDir),
+		gitBranch:       getGitBranch(currentDir),
+		dirHistory:      []string{currentDir},
+		historyIndex:    0,
+		recursiveSearch: false,
+		loading:         false,
+		searchMatches:   [][]int{},
 	}
 
 	m.loadFiles()
@@ -116,7 +131,7 @@ func initialModel() model {
 }
 
 func (m *model) loadFiles() {
-	files, err := ioutil.ReadDir(m.currentDir)
+	entries, err := os.ReadDir(m.currentDir)
 	if err != nil {
 		m.statusMsg = fmt.Sprintf("Error reading directory: %v", err)
 		m.statusExpiry = time.Now().Add(3 * time.Second)
@@ -136,22 +151,27 @@ func (m *model) loadFiles() {
 		})
 	}
 
-	for _, file := range files {
-		if !m.showHidden && strings.HasPrefix(file.Name(), ".") {
+	for _, entry := range entries {
+		if !m.showHidden && strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 
 		// Skip common ignore patterns
-		if shouldIgnore(file.Name()) {
+		if shouldIgnore(entry.Name()) {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
 			continue
 		}
 
 		item := fileItem{
-			path:    filepath.Join(m.currentDir, file.Name()),
-			name:    file.Name(),
-			isDir:   file.IsDir(),
-			size:    file.Size(),
-			modTime: file.ModTime(),
+			path:    filepath.Join(m.currentDir, entry.Name()),
+			name:    entry.Name(),
+			isDir:   entry.IsDir(),
+			size:    info.Size(),
+			modTime: info.ModTime(),
 		}
 
 		m.files = append(m.files, item)
@@ -167,20 +187,25 @@ func (m *model) loadFiles() {
 
 	m.filteredFiles = m.files
 	m.updatePreview()
+
+	// Update frecency when visiting a directory
+	m.updateFrecency(m.currentDir)
 }
 
 func (m *model) updateFilter() {
-	query := strings.ToLower(m.searchInput.Value())
+	query := m.searchInput.Value()
 	if query == "" {
 		m.filteredFiles = m.files
+		m.searchMatches = [][]int{}
 		return
 	}
 
-	m.filteredFiles = []fileItem{}
-	for _, file := range m.files {
-		if fuzzyMatch(strings.ToLower(file.name), query) {
-			m.filteredFiles = append(m.filteredFiles, file)
-		}
+	if m.recursiveSearch {
+		// Recursive search across entire project
+		m.recursiveSearchFiles(query)
+	} else {
+		// Search in current directory only
+		m.searchCurrentDir(query)
 	}
 
 	// Reset cursor if it's out of bounds
@@ -189,14 +214,86 @@ func (m *model) updateFilter() {
 	}
 }
 
-func fuzzyMatch(text, pattern string) bool {
-	patternIdx := 0
-	for _, ch := range text {
-		if patternIdx < len(pattern) && byte(ch) == pattern[patternIdx] {
-			patternIdx++
+func (m *model) searchCurrentDir(query string) {
+	// Build list of file names for fuzzy matching
+	names := make([]string, len(m.files))
+	for i, file := range m.files {
+		names[i] = file.name
+	}
+
+	// Use fuzzy library for better matching
+	matches := fuzzy.Find(query, names)
+
+	m.filteredFiles = []fileItem{}
+	m.searchMatches = [][]int{}
+
+	for _, match := range matches {
+		m.filteredFiles = append(m.filteredFiles, m.files[match.Index])
+		m.searchMatches = append(m.searchMatches, match.MatchedIndexes)
+	}
+}
+
+func (m *model) recursiveSearchFiles(query string) {
+	// Collect all files recursively
+	var allFiles []fileItem
+	var allNames []string
+
+	filepath.WalkDir(m.currentDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+
+		// Skip hidden files if not showing them
+		if !m.showHidden && strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Skip ignored patterns
+		if shouldIgnore(d.Name()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Get relative path for display
+		relPath, _ := filepath.Rel(m.currentDir, path)
+		if relPath == "." {
+			return nil
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+
+		allFiles = append(allFiles, fileItem{
+			path:    path,
+			name:    relPath,
+			isDir:   d.IsDir(),
+			size:    info.Size(),
+			modTime: info.ModTime(),
+		})
+		allNames = append(allNames, relPath)
+
+		return nil
+	})
+
+	// Use fuzzy matching
+	matches := fuzzy.Find(query, allNames)
+
+	m.filteredFiles = []fileItem{}
+	m.searchMatches = [][]int{}
+
+	for _, match := range matches {
+		if match.Index < len(allFiles) {
+			m.filteredFiles = append(m.filteredFiles, allFiles[match.Index])
+			m.searchMatches = append(m.searchMatches, match.MatchedIndexes)
 		}
 	}
-	return patternIdx == len(pattern)
 }
 
 func (m *model) updatePreview() {
@@ -249,32 +346,32 @@ func (m *model) wrapTextToLines(text string, width int) []string {
 }
 
 func (m *model) previewDirectory(path string) string {
-	files, err := ioutil.ReadDir(path)
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		return fmt.Sprintf("Error reading directory: %v", err)
 	}
 
 	var preview strings.Builder
 	preview.WriteString(fmt.Sprintf("📁 Directory: %s\n", filepath.Base(path)))
-	preview.WriteString(fmt.Sprintf("Items: %d\n\n", len(files)))
+	preview.WriteString(fmt.Sprintf("Items: %d\n\n", len(entries)))
 
 	count := 0
-	for _, file := range files {
+	for _, entry := range entries {
 		if count >= 20 {
-			preview.WriteString(fmt.Sprintf("\n... and %d more items", len(files)-20))
+			preview.WriteString(fmt.Sprintf("\n... and %d more items", len(entries)-20))
 			break
 		}
 
 		icon := "📄"
-		if file.IsDir() {
+		if entry.IsDir() {
 			icon = "📁"
-		} else if isImageFile(file.Name()) {
+		} else if isImageFile(entry.Name()) {
 			icon = "🖼️"
-		} else if isCodeFile(file.Name()) {
+		} else if isCodeFile(entry.Name()) {
 			icon = "📝"
 		}
 
-		preview.WriteString(fmt.Sprintf("%s %s\n", icon, file.Name()))
+		preview.WriteString(fmt.Sprintf("%s %s\n", icon, entry.Name()))
 		count++
 	}
 
@@ -308,7 +405,7 @@ func (m *model) previewFile(path string) string {
 	}
 
 	// Read file content
-	content, err := ioutil.ReadFile(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		preview.WriteString(fmt.Sprintf("Error reading file: %v", err))
 		return preview.String()
@@ -374,6 +471,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					targetPath := m.config.Bookmarks[m.bookmarksCursor]
 					// Ensure target is within root path
 					if m.config.RootPath == "" || strings.HasPrefix(targetPath, m.config.RootPath) {
+						m.addToHistory(targetPath)
 						m.currentDir = targetPath
 						m.cursor = 0
 						m.scrollOffset = 0
@@ -381,6 +479,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.mode = modeNormal
 						m.loadFiles()
 						m.gitModified = getGitModifiedFiles(m.currentDir)
+						m.gitBranch = getGitBranch(m.currentDir)
 					}
 				}
 				return m, nil
@@ -438,7 +537,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-
 		case modeConfirmDeleteFile:
 			switch msg.String() {
 			case "y", "Y":
@@ -469,11 +567,42 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = modeNormal
 				m.searchInput.SetValue("")
 				m.filteredFiles = m.files
+				m.searchMatches = [][]int{}
+				m.recursiveSearch = false
 				m.updatePreview()
 				return m, nil
 			case "enter":
 				m.mode = modeNormal
 				return m, nil
+			case "ctrl+r":
+				// Toggle recursive search
+				m.recursiveSearch = !m.recursiveSearch
+				m.updateFilter()
+				m.updatePreview()
+				if m.recursiveSearch {
+					m.statusMsg = "Recursive search enabled"
+				} else {
+					m.statusMsg = "Current directory search"
+				}
+				m.statusExpiry = time.Now().Add(2 * time.Second)
+				return m, nil
+			case "]", "alt+down":
+				// Scroll preview down
+				if m.showPreview && len(m.previewLines) > 0 {
+					availableHeight := m.height - 8
+					if availableHeight < 1 {
+						availableHeight = 3
+					}
+					contentHeight := availableHeight
+					if m.previewScroll < len(m.previewLines)-contentHeight {
+						m.previewScroll++
+					}
+				}
+			case "[", "alt+up":
+				// Scroll preview up
+				if m.showPreview && m.previewScroll > 0 {
+					m.previewScroll--
+				}
 			default:
 				m.searchInput, cmd = m.searchInput.Update(msg)
 				m.updateFilter()
@@ -482,7 +611,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case modeNormal:
-			switch msg.String() {
+			keyStr := msg.String()
+			// Debug: show what key was pressed for alt combinations
+			if strings.HasPrefix(keyStr, "alt") {
+				m.statusMsg = fmt.Sprintf("Key: %q", keyStr)
+				m.statusExpiry = time.Now().Add(3 * time.Second)
+			}
+
+			switch keyStr {
 			case "q", "ctrl+c":
 				return m, tea.Quit
 
@@ -498,7 +634,61 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updatePreview()
 				}
 
-			case "ctrl+s", "ctrl+down":
+			case "ctrl+d":
+				// Half-page down
+				pageSize := (m.height - 8) / 2
+				if pageSize < 1 {
+					pageSize = 5
+				}
+				m.cursor += pageSize
+				if m.cursor >= len(m.filteredFiles) {
+					m.cursor = len(m.filteredFiles) - 1
+				}
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
+				m.updatePreview()
+
+			case "ctrl+u":
+				// Half-page up
+				pageSize := (m.height - 8) / 2
+				if pageSize < 1 {
+					pageSize = 5
+				}
+				m.cursor -= pageSize
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
+				m.updatePreview()
+
+			case "ctrl+f":
+				// Full-page down
+				pageSize := m.height - 8
+				if pageSize < 1 {
+					pageSize = 10
+				}
+				m.cursor += pageSize
+				if m.cursor >= len(m.filteredFiles) {
+					m.cursor = len(m.filteredFiles) - 1
+				}
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
+				m.updatePreview()
+
+			case "ctrl+b":
+				// Full-page up
+				pageSize := m.height - 8
+				if pageSize < 1 {
+					pageSize = 10
+				}
+				m.cursor -= pageSize
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
+				m.updatePreview()
+
+			case "]", "alt+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
 					availableHeight := m.height - 8
@@ -514,7 +704,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-			case "ctrl+w", "ctrl+up":
+			case "[", "alt+up":
 				// Scroll preview up
 				if m.showPreview && m.previewScroll > 0 {
 					m.previewScroll--
@@ -534,12 +724,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 					selected := m.filteredFiles[m.cursor]
 					if selected.isDir {
+						m.addToHistory(selected.path)
 						m.currentDir = selected.path
 						m.cursor = 0
 						m.scrollOffset = 0
 						m.previewScroll = 0
 						m.loadFiles()
 						m.gitModified = getGitModifiedFiles(m.currentDir)
+						m.gitBranch = getGitBranch(m.currentDir)
 					} else {
 						return m, m.openFile(selected.path)
 					}
@@ -550,12 +742,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Check if we can go up (respect root path and filesystem root)
 				if m.currentDir != "/" && m.currentDir != m.config.RootPath &&
 					(m.config.RootPath == "" || strings.HasPrefix(parentDir, m.config.RootPath)) {
+					m.addToHistory(parentDir)
 					m.currentDir = parentDir
 					m.cursor = 0
 					m.scrollOffset = 0
 					m.previewScroll = 0
 					m.loadFiles()
 					m.gitModified = getGitModifiedFiles(m.currentDir)
+					m.gitBranch = getGitBranch(m.currentDir)
 				}
 
 			case "/":
@@ -611,11 +805,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "r":
 				m.loadFiles()
 				m.gitModified = getGitModifiedFiles(m.currentDir)
+				m.gitBranch = getGitBranch(m.currentDir)
 				m.statusMsg = "Refreshed"
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 
 			case "~":
 				home, _ := os.UserHomeDir()
+				m.addToHistory(home)
 				m.currentDir = home
 				m.cursor = 0
 				m.scrollOffset = 0
@@ -645,7 +841,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.statusExpiry = time.Now().Add(2 * time.Second)
 					}
 				}
-			
+
 			case "C":
 				// Copy file
 				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
@@ -762,18 +958,64 @@ func (m model) renderHeader() string {
 	}
 
 	if m.mode == modeSearch {
-		searchStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("226")).
-			Background(lipgloss.Color("235")).
-			Padding(0, 1)
+		// Build search text with mode indicator and hint
+		searchLabel := "Search: "
+		hint := " (ctrl+r)"
 
-		search := fmt.Sprintf("Search: %s", m.searchInput.View())
-		title = lipgloss.JoinHorizontal(lipgloss.Top,
-			titleStyle.Width(m.width-len(search)-4).Render(title),
-			searchStyle.Render(search),
-		)
+		if m.recursiveSearch {
+			searchLabel = "Search [RECURSIVE]: "
+		}
+
+		// Get the raw search value (not View() which has its own styling)
+		searchValue := m.searchInput.Value()
+
+		// Show cursor position with a visible indicator
+		cursorPos := m.searchInput.Position()
+		displayValue := searchValue
+		if len(displayValue) == 0 {
+			displayValue = "_" // Show cursor when empty
+		} else if cursorPos < len(displayValue) {
+			// Insert cursor indicator at position
+			displayValue = displayValue[:cursorPos] + "|" + displayValue[cursorPos:]
+		} else {
+			displayValue = displayValue + "|"
+		}
+
+		// Construct the full search text
+		searchText := searchLabel + displayValue + hint
+
+		// Calculate available width for title section
+		searchTextLen := lipgloss.Width(searchText)
+		titleWidth := m.width - searchTextLen - 2
+		if titleWidth < 20 {
+			titleWidth = 20
+			searchTextLen = m.width - titleWidth - 2
+		}
+
+		// Apply consistent background to both sections
+		baseStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("235")).
+			Foreground(lipgloss.Color("252"))
+
+		searchStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("235")).
+			Foreground(lipgloss.Color("226"))
+
+		titlePart := baseStyle.Width(titleWidth).Padding(0, 1).Render(title)
+		searchPart := searchStyle.Width(searchTextLen).Render(searchText)
+
+		// Join with full background
+		title = lipgloss.JoinHorizontal(lipgloss.Top, titlePart, searchPart)
 	}
 
+	// Return with or without additional styling
+	if m.mode == modeSearch {
+		// Already has background applied, return with full width
+		return lipgloss.NewStyle().
+			Background(lipgloss.Color("235")).
+			Width(m.width).
+			Render(title)
+	}
 	return titleStyle.Render(title)
 }
 
@@ -840,13 +1082,20 @@ func (m model) renderFileList(width int) string {
 			gitStatus = " [M]"
 		}
 
-		// Format item
+		// Format item with highlighting if in search mode
 		name := item.name
-		if len(name) > width-10 {
-			name = name[:width-13] + "..."
+		displayName := name
+
+		// Apply search highlighting if we have match positions
+		if m.mode == modeSearch && i < len(m.searchMatches) && len(m.searchMatches[i]) > 0 {
+			displayName = highlightMatches(name, m.searchMatches[i])
 		}
 
-		line := fmt.Sprintf("%s %s%s", icon, name, gitStatus)
+		if len(name) > width-10 {
+			displayName = displayName[:min(len(displayName), width-13)] + "..."
+		}
+
+		line := fmt.Sprintf("%s %s%s", icon, displayName, gitStatus)
 
 		// Style based on selection
 		if i == m.cursor {
@@ -887,9 +1136,9 @@ func (m model) renderPreview(width int) string {
 	previewStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
-		Width(width - 2).
-		Height(availableHeight + 2). // +2 for padding
-		Padding(1)
+		Width(width-2).
+		Height(availableHeight+2).
+		Padding(0, 1)
 
 	if len(m.previewLines) == 0 {
 		emptyStyle := lipgloss.NewStyle().
@@ -925,14 +1174,34 @@ func (m model) renderPreview(width int) string {
 		visibleLines = m.previewLines[startLine:endLine]
 	}
 
-	// Add scroll indicators
+	// Build content with exact line count to match file list height
 	var content []string
+	lineCount := 0
+
+	// Add top scroll indicator if needed
 	if startLine > 0 {
-		content = append(content, "▲ Scroll up with Ctrl+W")
+		content = append(content, "▲ [")
+		lineCount++
 	}
-	content = append(content, visibleLines...)
-	if endLine < len(m.previewLines) {
-		content = append(content, "▼ Scroll down with Ctrl+S")
+
+	// Add visible lines
+	for _, line := range visibleLines {
+		if lineCount < availableHeight {
+			content = append(content, line)
+			lineCount++
+		}
+	}
+
+	// Add bottom scroll indicator if needed (and there's room)
+	if endLine < len(m.previewLines) && lineCount < availableHeight {
+		content = append(content, "▼ ]")
+		lineCount++
+	}
+
+	// Pad with empty lines to match exact height
+	for lineCount < availableHeight {
+		content = append(content, "")
+		lineCount++
 	}
 
 	return previewStyle.Render(strings.Join(content, "\n"))
@@ -956,7 +1225,7 @@ func (m model) renderBookmarksView() string {
 	// Render bookmarks
 	var bookmarkItems []string
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-	headerText := fmt.Sprintf("📌 Bookmarks (%s navigate, %s go, %s vscode, %s delete)",
+	headerText := fmt.Sprintf("📌 Bookmarks - Sorted by Frecency (%s navigate, %s go, %s vscode, %s delete)",
 		keyStyle.Render("↑↓:"),
 		keyStyle.Render("enter:"),
 		keyStyle.Render("o:"),
@@ -967,17 +1236,32 @@ func (m model) renderBookmarksView() string {
 	if len(m.config.Bookmarks) == 0 {
 		bookmarkItems = append(bookmarkItems, "No bookmarks yet. Navigate to a directory and press 'B' to bookmark it.")
 	} else {
+		// Create sorted bookmarks by frecency
+		type bookmarkScore struct {
+			path  string
+			score int
+		}
+		sortedBookmarks := make([]bookmarkScore, len(m.config.Bookmarks))
 		for i, bookmark := range m.config.Bookmarks {
+			score := m.config.Frecency[bookmark]
+			sortedBookmarks[i] = bookmarkScore{path: bookmark, score: score}
+		}
+		// Sort by score descending
+		sort.Slice(sortedBookmarks, func(i, j int) bool {
+			return sortedBookmarks[i].score > sortedBookmarks[j].score
+		})
+
+		for i, bs := range sortedBookmarks {
 			icon := "📁"
-			name := filepath.Base(bookmark)
+			name := filepath.Base(bs.path)
 			if name == "" || name == "." {
-				name = bookmark
+				name = bs.path
 			}
 
 			// Show full path relative to root if possible
-			displayPath := bookmark
-			if m.config.RootPath != "" && strings.HasPrefix(bookmark, m.config.RootPath) {
-				rel, err := filepath.Rel(m.config.RootPath, bookmark)
+			displayPath := bs.path
+			if m.config.RootPath != "" && strings.HasPrefix(bs.path, m.config.RootPath) {
+				rel, err := filepath.Rel(m.config.RootPath, bs.path)
 				if err == nil && rel != "." {
 					displayPath = "~/" + rel
 				} else if rel == "." {
@@ -985,7 +1269,14 @@ func (m model) renderBookmarksView() string {
 				}
 			}
 
-			line := fmt.Sprintf("%s %s (%s)", icon, name, displayPath)
+			// Show frecency score
+			frecencyInfo := ""
+			if bs.score > 0 {
+				frecencyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("141"))
+				frecencyInfo = " " + frecencyStyle.Render(fmt.Sprintf("[%d visits]", bs.score))
+			}
+
+			line := fmt.Sprintf("%s %s (%s)%s", icon, name, displayPath, frecencyInfo)
 			if i == m.bookmarksCursor {
 				selectedStyle := lipgloss.NewStyle().
 					Background(lipgloss.Color("57")).
@@ -1061,7 +1352,7 @@ func (m model) renderConfirmFileOperationView(operation, actionType string) stri
 		borderColor = lipgloss.Color("214") // Orange
 		icon = "📁"
 	case "delete":
-		borderColor = lipgloss.Color("196") // Red  
+		borderColor = lipgloss.Color("196") // Red
 		icon = "🗑️"
 	case "paste":
 		borderColor = lipgloss.Color("46") // Green
@@ -1084,7 +1375,7 @@ func (m model) renderConfirmFileOperationView(operation, actionType string) stri
 
 	dialogContent = append(dialogContent, fmt.Sprintf("%s  Confirm %s", icon, operation))
 	dialogContent = append(dialogContent, "")
-	
+
 	if actionType == "copy" {
 		dialogContent = append(dialogContent, fmt.Sprintf("Copy '%s' to current directory?", fileName))
 	} else if actionType == "move" {
@@ -1095,7 +1386,7 @@ func (m model) renderConfirmFileOperationView(operation, actionType string) stri
 	} else if actionType == "paste" {
 		dialogContent = append(dialogContent, fmt.Sprintf("Paste '%s' to current directory?", fileName))
 	}
-	
+
 	dialogContent = append(dialogContent, "")
 
 	confirmText := fmt.Sprintf("%s Yes  %s No  %s Cancel",
@@ -1158,8 +1449,8 @@ func (m model) renderStatusBar() string {
 		helpPlainText = "↑↓: navigate • enter: go • o: vscode • d: delete • esc: exit"
 	} else {
 		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-		help = fmt.Sprintf("%s navigate • %s search • %s open • %s vscode • %s copy • %s cut • %s paste • %s delete • %s bookmarks • %s preview",
-			keyStyle.Render("↑↓:"),
+		help = fmt.Sprintf("%s navigate • %s search • %s open • %s vscode • %s bookmarks • %s add bookmark • %s back • %s preview",
+			keyStyle.Render("↑↓[]:"),
 			keyStyle.Render("/:"),
 			keyStyle.Render("enter:"),
 			keyStyle.Render("o:"),
@@ -1169,25 +1460,28 @@ func (m model) renderStatusBar() string {
 			keyStyle.Render("D:"),
 			keyStyle.Render("b:"),
 			keyStyle.Render("p:"))
-		helpPlainText = "↑↓: navigate • /: search • enter: open • o: vscode • C: copy • x: cut • V: paste • D: delete • b: bookmarks • p: preview"
+		helpPlainText = "↑↓[]: navigate • /: search • enter: open • o: vscode • b: bookmarks • B: add bookmark • esc: back • p: preview"
 	}
 
 	// Combine sections - use fixed widths to avoid overlap
 	leftWidth := len(leftInfo)
 	rightWidth := len(helpPlainText)
-	centerWidth := m.width - leftWidth - rightWidth - 4
+	centerWidth := m.width - leftWidth - rightWidth - 6 // account for padding
 
 	if centerWidth < 0 {
 		centerWidth = 0
 	}
 
-	status := lipgloss.JoinHorizontal(lipgloss.Top,
-		statusStyle.Width(leftWidth+1).Render(leftInfo),
-		statusStyle.Width(centerWidth).Align(lipgloss.Center).Render(center),
-		statusStyle.Width(rightWidth+1).Align(lipgloss.Right).Render(help),
-	)
+	// Create sections without background first
+	leftSection := lipgloss.NewStyle().Width(leftWidth + 2).Render(leftInfo)
+	centerSection := lipgloss.NewStyle().Width(centerWidth).Align(lipgloss.Center).Render(center)
+	rightSection := lipgloss.NewStyle().Width(rightWidth + 2).Align(lipgloss.Right).Render(help)
 
-	return status
+	// Join them together
+	combined := lipgloss.JoinHorizontal(lipgloss.Top, leftSection, centerSection, rightSection)
+
+	// Apply full-width background to entire status bar
+	return statusStyle.Render(combined)
 }
 
 // Helper functions
@@ -1222,7 +1516,13 @@ func (m *model) openFile(path string) tea.Cmd {
 
 func (m *model) editFile(path string) tea.Cmd {
 	return func() tea.Msg {
-		editors := []string{"code", "vim", "nano", "vi"}
+		// Use configured editor if set, otherwise try defaults
+		editors := []string{}
+		if m.config.Editor != "" {
+			editors = append(editors, m.config.Editor)
+		}
+		editors = append(editors, "code", "vim", "nano", "vi")
+
 		for _, editor := range editors {
 			if _, err := exec.LookPath(editor); err == nil {
 				cmd := exec.Command(editor, path)
@@ -1255,195 +1555,15 @@ func (m *model) openInVSCode(path string) tea.Cmd {
 }
 
 func (m *model) copyPath(path string) {
-	// Platform-specific clipboard commands
-	var cmd *exec.Cmd
-	switch {
-	case commandExists("xclip"):
-		cmd = exec.Command("xclip", "-selection", "clipboard")
-	case commandExists("pbcopy"):
-		cmd = exec.Command("pbcopy")
-	case commandExists("clip"):
-		cmd = exec.Command("clip")
-	}
-
-	if cmd != nil {
-		cmd.Stdin = strings.NewReader(path)
-		err := cmd.Run()
-		if err == nil {
-			m.statusMsg = fmt.Sprintf("Copied: %s", path)
-			m.statusExpiry = time.Now().Add(2 * time.Second)
-		}
-	}
-}
-
-func (m *model) copyFile(sourcePath string) tea.Cmd {
-	return func() tea.Msg {
-		fileName := filepath.Base(sourcePath)
-		destPath := filepath.Join(m.currentDir, "copy_of_"+fileName)
-		
-		// Check if destination already exists and create a unique name
-		counter := 1
-		for {
-			if _, err := os.Stat(destPath); os.IsNotExist(err) {
-				break
-			}
-			ext := filepath.Ext(fileName)
-			nameWithoutExt := strings.TrimSuffix(fileName, ext)
-			destPath = filepath.Join(m.currentDir, fmt.Sprintf("copy_of_%s_%d%s", nameWithoutExt, counter, ext))
-			counter++
-		}
-		
-		err := copyFileOrDir(sourcePath, destPath)
-		if err != nil {
-			return statusMsg{fmt.Sprintf("Copy failed: %v", err), 3 * time.Second}
-		}
-		
-		return statusMsg{fmt.Sprintf("Copied to: %s", filepath.Base(destPath)), 2 * time.Second}
-	}
-}
-
-
-func (m *model) deleteFile(filePath string) tea.Cmd {
-	return func() tea.Msg {
-		fileName := filepath.Base(filePath)
-		
-		err := os.RemoveAll(filePath)
-		if err != nil {
-			return statusMsg{fmt.Sprintf("Delete failed: %v", err), 3 * time.Second}
-		}
-		
-		return statusMsg{fmt.Sprintf("Deleted: %s", fileName), 2 * time.Second}
-	}
-}
-
-func (m *model) pasteFile(sourcePath string) tea.Cmd {
-	return func() tea.Msg {
-		fileName := filepath.Base(sourcePath)
-		destPath := filepath.Join(m.currentDir, fileName)
-		
-		var err error
-		var operation string
-		
-		if m.isCutOperation {
-			// Move operation (cut)
-			// Check if destination already exists and create a unique name
-			if _, statErr := os.Stat(destPath); !os.IsNotExist(statErr) && destPath != sourcePath {
-				counter := 1
-				for {
-					ext := filepath.Ext(fileName)
-					nameWithoutExt := strings.TrimSuffix(fileName, ext)
-					destPath = filepath.Join(m.currentDir, fmt.Sprintf("%s_%d%s", nameWithoutExt, counter, ext))
-					if _, err := os.Stat(destPath); os.IsNotExist(err) {
-						break
-					}
-					counter++
-				}
-			}
-			
-			err = os.Rename(sourcePath, destPath)
-			operation = "Moved"
-			
-			// Clear the cut operation after successful move
-			if err == nil {
-				m.copiedFilePath = ""
-				m.isCutOperation = false
-			}
-		} else {
-			// Copy operation
-			// Check if destination already exists and create a unique name
-			counter := 1
-			for {
-				if _, statErr := os.Stat(destPath); os.IsNotExist(statErr) {
-					break
-				}
-				ext := filepath.Ext(fileName)
-				nameWithoutExt := strings.TrimSuffix(fileName, ext)
-				destPath = filepath.Join(m.currentDir, fmt.Sprintf("%s_copy_%d%s", nameWithoutExt, counter, ext))
-				counter++
-			}
-			
-			err = copyFileOrDir(sourcePath, destPath)
-			operation = "Pasted"
-		}
-		
-		if err != nil {
-			return statusMsg{fmt.Sprintf("%s failed: %v", operation, err), 3 * time.Second}
-		}
-		
-		return statusMsg{fmt.Sprintf("%s: %s", operation, filepath.Base(destPath)), 2 * time.Second}
-	}
-}
-
-func copyFileOrDir(src, dst string) error {
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-	
-	if srcInfo.IsDir() {
-		return copyDir(src, dst)
+	// Use clipboard library for cross-platform support
+	err := clipboard.WriteAll(path)
+	if err == nil {
+		m.statusMsg = fmt.Sprintf("Copied: %s", path)
+		m.statusExpiry = time.Now().Add(2 * time.Second)
 	} else {
-		return copyFileTo(src, dst)
+		m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
+		m.statusExpiry = time.Now().Add(3 * time.Second)
 	}
-}
-
-func copyFileTo(src, dst string) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
-	
-	destFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-	
-	_, err = io.Copy(destFile, sourceFile)
-	if err != nil {
-		return err
-	}
-	
-	// Copy file permissions
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-	return os.Chmod(dst, srcInfo.Mode())
-}
-
-func copyDir(src, dst string) error {
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-	
-	err = os.MkdirAll(dst, srcInfo.Mode())
-	if err != nil {
-		return err
-	}
-	
-	files, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-	
-	for _, file := range files {
-		srcPath := filepath.Join(src, file.Name())
-		dstPath := filepath.Join(dst, file.Name())
-		
-		if file.IsDir() {
-			err = copyDir(srcPath, dstPath)
-		} else {
-			err = copyFileTo(srcPath, dstPath)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	
-	return nil
 }
 
 func getFileIcon(name string) string {
@@ -1633,11 +1753,13 @@ func loadConfig() *Config {
 	// Default config with root path as first bookmark
 	rootPath := filepath.Join(homeDir)
 	defaultConfig := &Config{
-		RootPath:        rootPath,
-		Bookmarks:       []string{rootPath},
-		ShowHidden:      false,
-		PreviewEnabled:  true,
-		PreviewMaxLines: 100,
+		RootPath:       rootPath,
+		Bookmarks:      []string{rootPath},
+		ShowHidden:     false,
+		PreviewEnabled: true,
+		Editor:         "",
+		Frecency:       make(map[string]int),
+		LastVisited:    make(map[string]string),
 	}
 
 	// Try to load existing config
@@ -1652,6 +1774,14 @@ func loadConfig() *Config {
 	if err := json.Unmarshal(data, config); err != nil {
 		// Return default config if parsing fails
 		return defaultConfig
+	}
+
+	// Initialize maps if they're nil
+	if config.Frecency == nil {
+		config.Frecency = make(map[string]int)
+	}
+	if config.LastVisited == nil {
+		config.LastVisited = make(map[string]string)
 	}
 
 	// Ensure root path is bookmarked
@@ -1686,6 +1816,100 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// addToHistory adds a directory to navigation history
+func (m *model) addToHistory(dir string) {
+	// Don't add if it's the same as current position
+	if m.historyIndex < len(m.dirHistory) && m.dirHistory[m.historyIndex] == dir {
+		return
+	}
+
+	// Truncate forward history if we're not at the end
+	if m.historyIndex < len(m.dirHistory)-1 {
+		m.dirHistory = m.dirHistory[:m.historyIndex+1]
+	}
+
+	// Add new directory
+	m.dirHistory = append(m.dirHistory, dir)
+	m.historyIndex = len(m.dirHistory) - 1
+
+	// Limit history size to 100 entries
+	if len(m.dirHistory) > 100 {
+		m.dirHistory = m.dirHistory[1:]
+		m.historyIndex--
+	}
+}
+
+// updateFrecency updates the frecency score for a directory
+func (m *model) updateFrecency(dir string) {
+	if m.config.Frecency == nil {
+		m.config.Frecency = make(map[string]int)
+	}
+	if m.config.LastVisited == nil {
+		m.config.LastVisited = make(map[string]string)
+	}
+
+	// Increment visit count
+	m.config.Frecency[dir]++
+
+	// Update last visited timestamp
+	m.config.LastVisited[dir] = time.Now().Format(time.RFC3339)
+
+	// Save config periodically (every 10 visits)
+	if m.config.Frecency[dir]%10 == 0 {
+		saveConfig(m.config)
+	}
+}
+
+// getGitBranch returns the current git branch name
+func getGitBranch(dir string) string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = dir
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// highlightMatches highlights matched characters in a string
+func highlightMatches(text string, matches []int) string {
+	if len(matches) == 0 {
+		return text
+	}
+
+	highlightStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("226")).
+		Bold(true)
+
+	runes := []rune(text)
+	var result strings.Builder
+	matchMap := make(map[int]bool)
+
+	for _, idx := range matches {
+		if idx < len(runes) {
+			matchMap[idx] = true
+		}
+	}
+
+	for i, r := range runes {
+		if matchMap[i] {
+			result.WriteString(highlightStyle.Render(string(r)))
+		} else {
+			result.WriteRune(r)
+		}
+	}
+
+	return result.String()
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func main() {
