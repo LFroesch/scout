@@ -1026,8 +1026,8 @@ func (m model) renderPreview(width int) string {
 	previewStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
-		Width(width - 2).
-		Height(availableHeight + 2).
+		Width(width-2).
+		Height(availableHeight+2).
 		Padding(0, 1)
 
 	if len(m.previewLines) == 0 {
@@ -1270,7 +1270,7 @@ func (m model) renderStatusBar() string {
 	} else {
 		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
 		help = fmt.Sprintf("%s navigate • %s search • %s open • %s vscode • %s bookmarks • %s add bookmark • %s back • %s preview",
-			keyStyle.Render("↑↓:"),
+			keyStyle.Render("↑↓[]:"),
 			keyStyle.Render("/:"),
 			keyStyle.Render("enter:"),
 			keyStyle.Render("o:"),
@@ -1278,7 +1278,7 @@ func (m model) renderStatusBar() string {
 			keyStyle.Render("B:"),
 			keyStyle.Render("esc:"),
 			keyStyle.Render("p:"))
-		helpPlainText = "↑↓: navigate • /: search • enter: open • o: vscode • b: bookmarks • B: add bookmark • esc: back • p: preview"
+		helpPlainText = "↑↓[]: navigate • /: search • enter: open • o: vscode • b: bookmarks • B: add bookmark • esc: back • p: preview"
 	}
 
 	// Combine sections - use fixed widths to avoid overlap
