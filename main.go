@@ -529,7 +529,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 				return m, nil
-			case "alt+down":
+			case "]", "alt+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
 					availableHeight := m.height - 8
@@ -541,7 +541,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.previewScroll++
 					}
 				}
-			case "alt+up":
+			case "[", "alt+up":
 				// Scroll preview up
 				if m.showPreview && m.previewScroll > 0 {
 					m.previewScroll--
@@ -631,7 +631,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.updatePreview()
 
-			case "alt+down":
+			case "]", "alt+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
 					availableHeight := m.height - 8
@@ -647,7 +647,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-			case "alt+up":
+			case "[", "alt+up":
 				// Scroll preview up
 				if m.showPreview && m.previewScroll > 0 {
 					m.previewScroll--
