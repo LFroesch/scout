@@ -529,7 +529,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 				return m, nil
-			case "]", "alt+down":
+			case "s", "alt+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
 					availableHeight := m.height - 8
@@ -541,7 +541,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.previewScroll++
 					}
 				}
-			case "[", "alt+up":
+			case "w", "alt+up":
 				// Scroll preview up
 				if m.showPreview && m.previewScroll > 0 {
 					m.previewScroll--
@@ -631,7 +631,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.updatePreview()
 
-			case "]", "alt+down":
+			case "s", "alt+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
 					availableHeight := m.height - 8
@@ -647,7 +647,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-			case "[", "alt+up":
+			case "w", "alt+up":
 				// Scroll preview up
 				if m.showPreview && m.previewScroll > 0 {
 					m.previewScroll--
@@ -1070,7 +1070,7 @@ func (m model) renderPreview(width int) string {
 
 	// Add top scroll indicator if needed
 	if startLine > 0 {
-		content = append(content, "▲ [")
+		content = append(content, "▲ w")
 		lineCount++
 	}
 
@@ -1084,7 +1084,7 @@ func (m model) renderPreview(width int) string {
 
 	// Add bottom scroll indicator if needed (and there's room)
 	if endLine < len(m.previewLines) && lineCount < availableHeight {
-		content = append(content, "▼ ]")
+		content = append(content, "▼ s")
 		lineCount++
 	}
 
@@ -1270,7 +1270,7 @@ func (m model) renderStatusBar() string {
 	} else {
 		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
 		help = fmt.Sprintf("%s navigate • %s search • %s open • %s vscode • %s bookmarks • %s add bookmark • %s back • %s preview",
-			keyStyle.Render("↑↓[]:"),
+			keyStyle.Render("↑↓ws:"),
 			keyStyle.Render("/:"),
 			keyStyle.Render("enter:"),
 			keyStyle.Render("o:"),
@@ -1278,7 +1278,7 @@ func (m model) renderStatusBar() string {
 			keyStyle.Render("B:"),
 			keyStyle.Render("esc:"),
 			keyStyle.Render("p:"))
-		helpPlainText = "↑↓[]: navigate • /: search • enter: open • o: vscode • b: bookmarks • B: add bookmark • esc: back • p: preview"
+		helpPlainText = "↑↓ws: navigate • /: search • enter: open • o: vscode • b: bookmarks • B: add bookmark • esc: back • p: preview"
 	}
 
 	// Combine sections - use fixed widths to avoid overlap
