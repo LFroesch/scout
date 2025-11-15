@@ -1027,8 +1027,9 @@ func (m model) renderPreview(width int) string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Width(width - 2).
-		Height(availableHeight + 2). // +2 for padding
-		Padding(1)
+		Height(availableHeight + 2).
+		MaxHeight(availableHeight + 2). // Enforce fixed height
+		Padding(0, 1) // Same padding as file list
 
 	if len(m.previewLines) == 0 {
 		emptyStyle := lipgloss.NewStyle().
@@ -1067,13 +1068,14 @@ func (m model) renderPreview(width int) string {
 	// Add scroll indicators
 	var content []string
 	if startLine > 0 {
-		content = append(content, "▲ Scroll up with Alt+↑")
+		content = append(content, "▲ Scroll up with [")
 	}
 	content = append(content, visibleLines...)
 	if endLine < len(m.previewLines) {
-		content = append(content, "▼ Scroll down with Alt+↓")
+		content = append(content, "▼ Scroll down with ]")
 	}
 
+	// Render with fixed height - prevent text wrapping from expanding the box
 	return previewStyle.Render(strings.Join(content, "\n"))
 }
 
