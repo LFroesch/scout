@@ -1028,8 +1028,7 @@ func (m model) renderPreview(width int) string {
 		BorderForeground(lipgloss.Color("240")).
 		Width(width - 2).
 		Height(availableHeight + 2).
-		MaxHeight(availableHeight + 2). // Enforce fixed height
-		Padding(0, 1) // Same padding as file list
+		Padding(0, 1)
 
 	if len(m.previewLines) == 0 {
 		emptyStyle := lipgloss.NewStyle().
@@ -1065,17 +1064,36 @@ func (m model) renderPreview(width int) string {
 		visibleLines = m.previewLines[startLine:endLine]
 	}
 
-	// Add scroll indicators
+	// Build content with exact line count to match file list height
 	var content []string
+	lineCount := 0
+
+	// Add top scroll indicator if needed
 	if startLine > 0 {
-		content = append(content, "▲ Scroll up with [")
-	}
-	content = append(content, visibleLines...)
-	if endLine < len(m.previewLines) {
-		content = append(content, "▼ Scroll down with ]")
+		content = append(content, "▲ [")
+		lineCount++
 	}
 
-	// Render with fixed height - prevent text wrapping from expanding the box
+	// Add visible lines
+	for _, line := range visibleLines {
+		if lineCount < availableHeight {
+			content = append(content, line)
+			lineCount++
+		}
+	}
+
+	// Add bottom scroll indicator if needed (and there's room)
+	if endLine < len(m.previewLines) && lineCount < availableHeight {
+		content = append(content, "▼ ]")
+		lineCount++
+	}
+
+	// Pad with empty lines to match exact height
+	for lineCount < availableHeight {
+		content = append(content, "")
+		lineCount++
+	}
+
 	return previewStyle.Render(strings.Join(content, "\n"))
 }
 
