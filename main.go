@@ -824,35 +824,32 @@ func (m model) renderHeader() string {
 	}
 
 	if m.mode == modeSearch {
-		// Create search section with matching background
-		searchContainerStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("235")).
-			Foreground(lipgloss.Color("226")).
-			Padding(0, 1)
-
-		// Build search text with mode indicator
+		// Build search text with mode indicator and hint
 		searchLabel := "Search: "
+		hint := "(ctrl+r)"
 
 		if m.recursiveSearch {
 			searchLabel = "Search [RECURSIVE]: "
 		}
 
-		// Combine label and input
-		searchText := searchLabel + m.searchInput.View()
+		// Combine label, input, and hint
+		searchText := searchLabel + m.searchInput.View() + " " + hint
 
 		// Calculate available width for title
-		searchWidth := lipgloss.Width(searchText) + 2 // +2 for padding
+		searchWidth := len(searchLabel) + len(m.searchInput.Value()) + len(hint) + 4 // +4 for spacing
 		titleWidth := m.width - searchWidth
 		if titleWidth < 20 {
 			titleWidth = 20
 		}
 
+		// Don't wrap in titleStyle yet - just join the sections
 		title = lipgloss.JoinHorizontal(lipgloss.Top,
-			titleStyle.Width(titleWidth).Render(title),
-			searchContainerStyle.Render(searchText),
+			lipgloss.NewStyle().Width(titleWidth).Render(title),
+			lipgloss.NewStyle().Width(searchWidth).Render(searchText),
 		)
 	}
 
+	// Apply full-width background to entire header
 	return titleStyle.Render(title)
 }
 
@@ -1211,19 +1208,22 @@ func (m model) renderStatusBar() string {
 	// Combine sections - use fixed widths to avoid overlap
 	leftWidth := len(leftInfo)
 	rightWidth := len(helpPlainText)
-	centerWidth := m.width - leftWidth - rightWidth - 4
+	centerWidth := m.width - leftWidth - rightWidth - 6 // account for padding
 
 	if centerWidth < 0 {
 		centerWidth = 0
 	}
 
-	status := lipgloss.JoinHorizontal(lipgloss.Top,
-		statusStyle.Width(leftWidth+1).Render(leftInfo),
-		statusStyle.Width(centerWidth).Align(lipgloss.Center).Render(center),
-		statusStyle.Width(rightWidth+1).Align(lipgloss.Right).Render(help),
-	)
+	// Create sections without background first
+	leftSection := lipgloss.NewStyle().Width(leftWidth + 2).Render(leftInfo)
+	centerSection := lipgloss.NewStyle().Width(centerWidth).Align(lipgloss.Center).Render(center)
+	rightSection := lipgloss.NewStyle().Width(rightWidth + 2).Align(lipgloss.Right).Render(help)
 
-	return status
+	// Join them together
+	combined := lipgloss.JoinHorizontal(lipgloss.Top, leftSection, centerSection, rightSection)
+
+	// Apply full-width background to entire status bar
+	return statusStyle.Render(combined)
 }
 
 // Helper functions
