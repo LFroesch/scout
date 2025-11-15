@@ -834,10 +834,13 @@ func (m model) renderHeader() string {
 		searchLabel := "Search: "
 		searchHint := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
-			Render("(ctrl+r: toggle recursive)")
+			Render("(ctrl+r)")
 
 		if m.recursiveSearch {
 			searchLabel = "Search [RECURSIVE]: "
+			searchHint = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240")).
+				Render("(ctrl+r)")
 		}
 
 		// Combine label, input, and hint
