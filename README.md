@@ -89,8 +89,8 @@ scout /path/to/directory
 - **`H`** - Toggle hidden files
 - **`p`** - Toggle preview pane
 - **`r`** - Refresh current directory
-- **`ctrl+↓`** - Scroll preview down
-- **`ctrl+↑`** - Scroll preview up
+- **`alt+↓`** - Scroll preview down
+- **`alt+↑`** - Scroll preview up
 
 ### General
 - **`q/ctrl+c`** - Quit Scout
@@ -142,7 +142,7 @@ Scout automatically previews:
 Large files (>1MB) and binary files are not previewed for performance.
 
 ### Preview Navigation
-- Use **`ctrl+↓`** and **`ctrl+↑`** to scroll through long file contents
+- Use **`alt+↓`** and **`alt+↑`** to scroll through long file contents
 - Preview automatically wraps text to fit the terminal width
 - Scroll indicators show when more content is available above/below
 
@@ -231,7 +231,7 @@ Scout is designed to be fast:
 ```
 1. Navigate with `j/k` or `ctrl+d/u` for fast scrolling
 2. Preview shows on the right
-3. Use `ctrl+↑/↓` to scroll preview
+3. Use `alt+↑/↓` to scroll preview
 4. Press `p` to toggle preview
 5. Press `e` to edit selected file
 ```
