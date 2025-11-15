@@ -826,30 +826,62 @@ func (m model) renderHeader() string {
 	if m.mode == modeSearch {
 		// Build search text with mode indicator and hint
 		searchLabel := "Search: "
-		hint := "(ctrl+r)"
+		hint := " (ctrl+r)"
 
 		if m.recursiveSearch {
 			searchLabel = "Search [RECURSIVE]: "
 		}
 
-		// Combine label, input, and hint
-		searchText := searchLabel + m.searchInput.View() + " " + hint
+		// Get the raw search value (not View() which has its own styling)
+		searchValue := m.searchInput.Value()
 
-		// Calculate available width for title
-		searchWidth := len(searchLabel) + len(m.searchInput.Value()) + len(hint) + 4 // +4 for spacing
-		titleWidth := m.width - searchWidth
-		if titleWidth < 20 {
-			titleWidth = 20
+		// Show cursor position with a visible indicator
+		cursorPos := m.searchInput.Position()
+		displayValue := searchValue
+		if len(displayValue) == 0 {
+			displayValue = "_" // Show cursor when empty
+		} else if cursorPos < len(displayValue) {
+			// Insert cursor indicator at position
+			displayValue = displayValue[:cursorPos] + "|" + displayValue[cursorPos:]
+		} else {
+			displayValue = displayValue + "|"
 		}
 
-		// Don't wrap in titleStyle yet - just join the sections
-		title = lipgloss.JoinHorizontal(lipgloss.Top,
-			lipgloss.NewStyle().Width(titleWidth).Render(title),
-			lipgloss.NewStyle().Width(searchWidth).Render(searchText),
-		)
+		// Construct the full search text
+		searchText := searchLabel + displayValue + hint
+
+		// Calculate available width for title section
+		searchTextLen := lipgloss.Width(searchText)
+		titleWidth := m.width - searchTextLen - 2
+		if titleWidth < 20 {
+			titleWidth = 20
+			searchTextLen = m.width - titleWidth - 2
+		}
+
+		// Apply consistent background to both sections
+		baseStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("235")).
+			Foreground(lipgloss.Color("252"))
+
+		searchStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("235")).
+			Foreground(lipgloss.Color("226"))
+
+		titlePart := baseStyle.Width(titleWidth).Padding(0, 1).Render(title)
+		searchPart := searchStyle.Width(searchTextLen).Render(searchText)
+
+		// Join with full background
+		title = lipgloss.JoinHorizontal(lipgloss.Top, titlePart, searchPart)
 	}
 
-	// Apply full-width background to entire header
+	// Return with or without additional styling
+	if m.mode == modeSearch {
+		// Already has background applied, return with full width
+		return lipgloss.NewStyle().
+			Background(lipgloss.Color("235")).
+			Width(m.width).
+			Render(title)
+	}
 	return titleStyle.Render(title)
 }
 
