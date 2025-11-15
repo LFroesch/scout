@@ -92,9 +92,10 @@ func initialModel() model {
 	ti.Placeholder = "Type to search..."
 	ti.CharLimit = 256
 	ti.Width = 50
-	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("226"))
-	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
+	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Background(lipgloss.Color("235"))
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Background(lipgloss.Color("235"))
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Background(lipgloss.Color("235"))
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Background(lipgloss.Color("235"))
 
 	m := model{
 		mode:            modeNormal,
@@ -610,7 +611,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.updatePreview()
 
-			case "ctrl+down":
+			case "alt+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
 					availableHeight := m.height - 8
@@ -626,7 +627,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-			case "ctrl+up":
+			case "alt+up":
 				// Scroll preview up
 				if m.showPreview && m.previewScroll > 0 {
 					m.previewScroll--
@@ -1027,11 +1028,11 @@ func (m model) renderPreview(width int) string {
 	// Add scroll indicators
 	var content []string
 	if startLine > 0 {
-		content = append(content, "▲ Scroll up with Ctrl+↑")
+		content = append(content, "▲ Scroll up with Alt+↑")
 	}
 	content = append(content, visibleLines...)
 	if endLine < len(m.previewLines) {
-		content = append(content, "▼ Scroll down with Ctrl+↓")
+		content = append(content, "▼ Scroll down with Alt+↓")
 	}
 
 	return previewStyle.Render(strings.Join(content, "\n"))
