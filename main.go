@@ -529,6 +529,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 				return m, nil
+			case "alt+down":
+				// Scroll preview down
+				if m.showPreview && len(m.previewLines) > 0 {
+					availableHeight := m.height - 8
+					if availableHeight < 1 {
+						availableHeight = 3
+					}
+					contentHeight := availableHeight
+					if m.previewScroll < len(m.previewLines)-contentHeight {
+						m.previewScroll++
+					}
+				}
+			case "alt+up":
+				// Scroll preview up
+				if m.showPreview && m.previewScroll > 0 {
+					m.previewScroll--
+				}
 			default:
 				m.searchInput, cmd = m.searchInput.Update(msg)
 				m.updateFilter()
@@ -537,7 +554,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case modeNormal:
-			switch msg.String() {
+			keyStr := msg.String()
+			// Debug: show what key was pressed for alt combinations
+			if strings.HasPrefix(keyStr, "alt") {
+				m.statusMsg = fmt.Sprintf("Key: %q", keyStr)
+				m.statusExpiry = time.Now().Add(3 * time.Second)
+			}
+
+			switch keyStr {
 			case "q", "ctrl+c":
 				return m, tea.Quit
 
