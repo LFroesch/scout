@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -12,9 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sahilm/fuzzy"
 )
 
 type mode int
@@ -37,10 +39,13 @@ type fileItem struct {
 }
 
 type Config struct {
-	RootPath       string   `json:"root_path"`
-	Bookmarks      []string `json:"bookmarks"`
-	ShowHidden     bool     `json:"show_hidden"`
-	PreviewEnabled bool     `json:"preview_enabled"`
+	RootPath       string            `json:"root_path"`
+	Bookmarks      []string          `json:"bookmarks"`
+	ShowHidden     bool              `json:"show_hidden"`
+	PreviewEnabled bool              `json:"preview_enabled"`
+	Editor         string            `json:"editor"`
+	Frecency       map[string]int    `json:"frecency"`
+	LastVisited    map[string]string `json:"last_visited"` // path -> timestamp
 }
 
 type model struct {
@@ -62,8 +67,14 @@ type model struct {
 	previewLines        []string
 	config              *Config
 	gitModified         map[string]bool
+	gitBranch           string
 	statusMsg           string
 	statusExpiry        time.Time
+	dirHistory          []string // Navigation history
+	historyIndex        int      // Current position in history
+	recursiveSearch     bool     // Toggle for recursive vs current dir search
+	loading             bool     // Loading indicator
+	searchMatches       [][]int  // Character positions that matched in fuzzy search
 }
 
 func initialModel() model {
@@ -96,6 +107,12 @@ func initialModel() model {
 		showPreview:     config.PreviewEnabled,
 		config:          config,
 		gitModified:     getGitModifiedFiles(currentDir),
+		gitBranch:       getGitBranch(currentDir),
+		dirHistory:      []string{currentDir},
+		historyIndex:    0,
+		recursiveSearch: false,
+		loading:         false,
+		searchMatches:   [][]int{},
 	}
 
 	m.loadFiles()
@@ -103,7 +120,7 @@ func initialModel() model {
 }
 
 func (m *model) loadFiles() {
-	files, err := ioutil.ReadDir(m.currentDir)
+	entries, err := os.ReadDir(m.currentDir)
 	if err != nil {
 		m.statusMsg = fmt.Sprintf("Error reading directory: %v", err)
 		m.statusExpiry = time.Now().Add(3 * time.Second)
@@ -123,22 +140,27 @@ func (m *model) loadFiles() {
 		})
 	}
 
-	for _, file := range files {
-		if !m.showHidden && strings.HasPrefix(file.Name(), ".") {
+	for _, entry := range entries {
+		if !m.showHidden && strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 
 		// Skip common ignore patterns
-		if shouldIgnore(file.Name()) {
+		if shouldIgnore(entry.Name()) {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
 			continue
 		}
 
 		item := fileItem{
-			path:    filepath.Join(m.currentDir, file.Name()),
-			name:    file.Name(),
-			isDir:   file.IsDir(),
-			size:    file.Size(),
-			modTime: file.ModTime(),
+			path:    filepath.Join(m.currentDir, entry.Name()),
+			name:    entry.Name(),
+			isDir:   entry.IsDir(),
+			size:    info.Size(),
+			modTime: info.ModTime(),
 		}
 
 		m.files = append(m.files, item)
@@ -154,20 +176,25 @@ func (m *model) loadFiles() {
 
 	m.filteredFiles = m.files
 	m.updatePreview()
+
+	// Update frecency when visiting a directory
+	m.updateFrecency(m.currentDir)
 }
 
 func (m *model) updateFilter() {
-	query := strings.ToLower(m.searchInput.Value())
+	query := m.searchInput.Value()
 	if query == "" {
 		m.filteredFiles = m.files
+		m.searchMatches = [][]int{}
 		return
 	}
 
-	m.filteredFiles = []fileItem{}
-	for _, file := range m.files {
-		if fuzzyMatch(strings.ToLower(file.name), query) {
-			m.filteredFiles = append(m.filteredFiles, file)
-		}
+	if m.recursiveSearch {
+		// Recursive search across entire project
+		m.recursiveSearchFiles(query)
+	} else {
+		// Search in current directory only
+		m.searchCurrentDir(query)
 	}
 
 	// Reset cursor if it's out of bounds
@@ -176,14 +203,86 @@ func (m *model) updateFilter() {
 	}
 }
 
-func fuzzyMatch(text, pattern string) bool {
-	patternIdx := 0
-	for _, ch := range text {
-		if patternIdx < len(pattern) && byte(ch) == pattern[patternIdx] {
-			patternIdx++
+func (m *model) searchCurrentDir(query string) {
+	// Build list of file names for fuzzy matching
+	names := make([]string, len(m.files))
+	for i, file := range m.files {
+		names[i] = file.name
+	}
+
+	// Use fuzzy library for better matching
+	matches := fuzzy.Find(query, names)
+
+	m.filteredFiles = []fileItem{}
+	m.searchMatches = [][]int{}
+
+	for _, match := range matches {
+		m.filteredFiles = append(m.filteredFiles, m.files[match.Index])
+		m.searchMatches = append(m.searchMatches, match.MatchedIndexes)
+	}
+}
+
+func (m *model) recursiveSearchFiles(query string) {
+	// Collect all files recursively
+	var allFiles []fileItem
+	var allNames []string
+
+	filepath.WalkDir(m.currentDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+
+		// Skip hidden files if not showing them
+		if !m.showHidden && strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Skip ignored patterns
+		if shouldIgnore(d.Name()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Get relative path for display
+		relPath, _ := filepath.Rel(m.currentDir, path)
+		if relPath == "." {
+			return nil
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+
+		allFiles = append(allFiles, fileItem{
+			path:    path,
+			name:    relPath,
+			isDir:   d.IsDir(),
+			size:    info.Size(),
+			modTime: info.ModTime(),
+		})
+		allNames = append(allNames, relPath)
+
+		return nil
+	})
+
+	// Use fuzzy matching
+	matches := fuzzy.Find(query, allNames)
+
+	m.filteredFiles = []fileItem{}
+	m.searchMatches = [][]int{}
+
+	for _, match := range matches {
+		if match.Index < len(allFiles) {
+			m.filteredFiles = append(m.filteredFiles, allFiles[match.Index])
+			m.searchMatches = append(m.searchMatches, match.MatchedIndexes)
 		}
 	}
-	return patternIdx == len(pattern)
 }
 
 func (m *model) updatePreview() {
@@ -236,32 +335,32 @@ func (m *model) wrapTextToLines(text string, width int) []string {
 }
 
 func (m *model) previewDirectory(path string) string {
-	files, err := ioutil.ReadDir(path)
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		return fmt.Sprintf("Error reading directory: %v", err)
 	}
 
 	var preview strings.Builder
 	preview.WriteString(fmt.Sprintf("📁 Directory: %s\n", filepath.Base(path)))
-	preview.WriteString(fmt.Sprintf("Items: %d\n\n", len(files)))
+	preview.WriteString(fmt.Sprintf("Items: %d\n\n", len(entries)))
 
 	count := 0
-	for _, file := range files {
+	for _, entry := range entries {
 		if count >= 20 {
-			preview.WriteString(fmt.Sprintf("\n... and %d more items", len(files)-20))
+			preview.WriteString(fmt.Sprintf("\n... and %d more items", len(entries)-20))
 			break
 		}
 
 		icon := "📄"
-		if file.IsDir() {
+		if entry.IsDir() {
 			icon = "📁"
-		} else if isImageFile(file.Name()) {
+		} else if isImageFile(entry.Name()) {
 			icon = "🖼️"
-		} else if isCodeFile(file.Name()) {
+		} else if isCodeFile(entry.Name()) {
 			icon = "📝"
 		}
 
-		preview.WriteString(fmt.Sprintf("%s %s\n", icon, file.Name()))
+		preview.WriteString(fmt.Sprintf("%s %s\n", icon, entry.Name()))
 		count++
 	}
 
@@ -295,7 +394,7 @@ func (m *model) previewFile(path string) string {
 	}
 
 	// Read file content
-	content, err := ioutil.ReadFile(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		preview.WriteString(fmt.Sprintf("Error reading file: %v", err))
 		return preview.String()
@@ -351,6 +450,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					targetPath := m.config.Bookmarks[m.bookmarksCursor]
 					// Ensure target is within root path
 					if m.config.RootPath == "" || strings.HasPrefix(targetPath, m.config.RootPath) {
+						m.addToHistory(targetPath)
 						m.currentDir = targetPath
 						m.cursor = 0
 						m.scrollOffset = 0
@@ -358,6 +458,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.mode = modeNormal
 						m.loadFiles()
 						m.gitModified = getGitModifiedFiles(m.currentDir)
+						m.gitBranch = getGitBranch(m.currentDir)
 					}
 				}
 				return m, nil
@@ -409,10 +510,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = modeNormal
 				m.searchInput.SetValue("")
 				m.filteredFiles = m.files
+				m.searchMatches = [][]int{}
+				m.recursiveSearch = false
 				m.updatePreview()
 				return m, nil
 			case "enter":
 				m.mode = modeNormal
+				return m, nil
+			case "ctrl+r":
+				// Toggle recursive search
+				m.recursiveSearch = !m.recursiveSearch
+				m.updateFilter()
+				m.updatePreview()
+				if m.recursiveSearch {
+					m.statusMsg = "Recursive search enabled"
+				} else {
+					m.statusMsg = "Current directory search"
+				}
+				m.statusExpiry = time.Now().Add(2 * time.Second)
 				return m, nil
 			default:
 				m.searchInput, cmd = m.searchInput.Update(msg)
@@ -436,6 +551,90 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor > 0 {
 					m.cursor--
 					m.updatePreview()
+				}
+
+			case "ctrl+d":
+				// Half-page down
+				pageSize := (m.height - 8) / 2
+				if pageSize < 1 {
+					pageSize = 5
+				}
+				m.cursor += pageSize
+				if m.cursor >= len(m.filteredFiles) {
+					m.cursor = len(m.filteredFiles) - 1
+				}
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
+				m.updatePreview()
+
+			case "ctrl+u":
+				// Half-page up
+				pageSize := (m.height - 8) / 2
+				if pageSize < 1 {
+					pageSize = 5
+				}
+				m.cursor -= pageSize
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
+				m.updatePreview()
+
+			case "ctrl+f":
+				// Full-page down
+				pageSize := m.height - 8
+				if pageSize < 1 {
+					pageSize = 10
+				}
+				m.cursor += pageSize
+				if m.cursor >= len(m.filteredFiles) {
+					m.cursor = len(m.filteredFiles) - 1
+				}
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
+				m.updatePreview()
+
+			case "ctrl+b":
+				// Full-page up
+				pageSize := m.height - 8
+				if pageSize < 1 {
+					pageSize = 10
+				}
+				m.cursor -= pageSize
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
+				m.updatePreview()
+
+			case "alt+left":
+				// Go back in history
+				if m.historyIndex > 0 {
+					m.historyIndex--
+					m.currentDir = m.dirHistory[m.historyIndex]
+					m.cursor = 0
+					m.scrollOffset = 0
+					m.previewScroll = 0
+					m.loadFiles()
+					m.gitModified = getGitModifiedFiles(m.currentDir)
+					m.gitBranch = getGitBranch(m.currentDir)
+					m.statusMsg = "⬅️ Back"
+					m.statusExpiry = time.Now().Add(1 * time.Second)
+				}
+
+			case "alt+right":
+				// Go forward in history
+				if m.historyIndex < len(m.dirHistory)-1 {
+					m.historyIndex++
+					m.currentDir = m.dirHistory[m.historyIndex]
+					m.cursor = 0
+					m.scrollOffset = 0
+					m.previewScroll = 0
+					m.loadFiles()
+					m.gitModified = getGitModifiedFiles(m.currentDir)
+					m.gitBranch = getGitBranch(m.currentDir)
+					m.statusMsg = "➡️ Forward"
+					m.statusExpiry = time.Now().Add(1 * time.Second)
 				}
 
 			case "ctrl+s", "ctrl+down":
@@ -474,12 +673,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 					selected := m.filteredFiles[m.cursor]
 					if selected.isDir {
+						m.addToHistory(selected.path)
 						m.currentDir = selected.path
 						m.cursor = 0
 						m.scrollOffset = 0
 						m.previewScroll = 0
 						m.loadFiles()
 						m.gitModified = getGitModifiedFiles(m.currentDir)
+						m.gitBranch = getGitBranch(m.currentDir)
 					} else {
 						return m, m.openFile(selected.path)
 					}
@@ -490,12 +691,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Check if we can go up (respect root path and filesystem root)
 				if m.currentDir != "/" && m.currentDir != m.config.RootPath &&
 					(m.config.RootPath == "" || strings.HasPrefix(parentDir, m.config.RootPath)) {
+					m.addToHistory(parentDir)
 					m.currentDir = parentDir
 					m.cursor = 0
 					m.scrollOffset = 0
 					m.previewScroll = 0
 					m.loadFiles()
 					m.gitModified = getGitModifiedFiles(m.currentDir)
+					m.gitBranch = getGitBranch(m.currentDir)
 				}
 
 			case "/":
@@ -551,11 +754,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "r":
 				m.loadFiles()
 				m.gitModified = getGitModifiedFiles(m.currentDir)
+				m.gitBranch = getGitBranch(m.currentDir)
 				m.statusMsg = "Refreshed"
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 
 			case "~":
 				home, _ := os.UserHomeDir()
+				m.addToHistory(home)
 				m.currentDir = home
 				m.cursor = 0
 				m.scrollOffset = 0
@@ -646,6 +851,13 @@ func (m model) renderHeader() string {
 		title = "🔍 Scout - Bookmarks (ESC to exit)"
 	} else {
 		title = fmt.Sprintf("🔍 Scout - %s", m.currentDir)
+		// Add git branch if available
+		if m.gitBranch != "" {
+			branchStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("141")).
+				Bold(true)
+			title += " " + branchStyle.Render(fmt.Sprintf("(%s)", m.gitBranch))
+		}
 	}
 
 	if m.mode == modeSearch {
@@ -654,7 +866,11 @@ func (m model) renderHeader() string {
 			Background(lipgloss.Color("235")).
 			Padding(0, 1)
 
-		search := fmt.Sprintf("Search: %s", m.searchInput.View())
+		searchMode := ""
+		if m.recursiveSearch {
+			searchMode = " [RECURSIVE]"
+		}
+		search := fmt.Sprintf("Search%s: %s", searchMode, m.searchInput.View())
 		title = lipgloss.JoinHorizontal(lipgloss.Top,
 			titleStyle.Width(m.width-len(search)-4).Render(title),
 			searchStyle.Render(search),
@@ -727,13 +943,20 @@ func (m model) renderFileList(width int) string {
 			gitStatus = " [M]"
 		}
 
-		// Format item
+		// Format item with highlighting if in search mode
 		name := item.name
-		if len(name) > width-10 {
-			name = name[:width-13] + "..."
+		displayName := name
+
+		// Apply search highlighting if we have match positions
+		if m.mode == modeSearch && i < len(m.searchMatches) && len(m.searchMatches[i]) > 0 {
+			displayName = highlightMatches(name, m.searchMatches[i])
 		}
 
-		line := fmt.Sprintf("%s %s%s", icon, name, gitStatus)
+		if len(name) > width-10 {
+			displayName = displayName[:min(len(displayName), width-13)] + "..."
+		}
+
+		line := fmt.Sprintf("%s %s%s", icon, displayName, gitStatus)
 
 		// Style based on selection
 		if i == m.cursor {
@@ -843,7 +1066,7 @@ func (m model) renderBookmarksView() string {
 	// Render bookmarks
 	var bookmarkItems []string
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-	headerText := fmt.Sprintf("📌 Bookmarks (%s navigate, %s go, %s vscode, %s delete)",
+	headerText := fmt.Sprintf("📌 Bookmarks - Sorted by Frecency (%s navigate, %s go, %s vscode, %s delete)",
 		keyStyle.Render("↑↓:"),
 		keyStyle.Render("enter:"),
 		keyStyle.Render("o:"),
@@ -854,17 +1077,32 @@ func (m model) renderBookmarksView() string {
 	if len(m.config.Bookmarks) == 0 {
 		bookmarkItems = append(bookmarkItems, "No bookmarks yet. Navigate to a directory and press 'B' to bookmark it.")
 	} else {
+		// Create sorted bookmarks by frecency
+		type bookmarkScore struct {
+			path  string
+			score int
+		}
+		sortedBookmarks := make([]bookmarkScore, len(m.config.Bookmarks))
 		for i, bookmark := range m.config.Bookmarks {
+			score := m.config.Frecency[bookmark]
+			sortedBookmarks[i] = bookmarkScore{path: bookmark, score: score}
+		}
+		// Sort by score descending
+		sort.Slice(sortedBookmarks, func(i, j int) bool {
+			return sortedBookmarks[i].score > sortedBookmarks[j].score
+		})
+
+		for i, bs := range sortedBookmarks {
 			icon := "📁"
-			name := filepath.Base(bookmark)
+			name := filepath.Base(bs.path)
 			if name == "" || name == "." {
-				name = bookmark
+				name = bs.path
 			}
 
 			// Show full path relative to root if possible
-			displayPath := bookmark
-			if m.config.RootPath != "" && strings.HasPrefix(bookmark, m.config.RootPath) {
-				rel, err := filepath.Rel(m.config.RootPath, bookmark)
+			displayPath := bs.path
+			if m.config.RootPath != "" && strings.HasPrefix(bs.path, m.config.RootPath) {
+				rel, err := filepath.Rel(m.config.RootPath, bs.path)
 				if err == nil && rel != "." {
 					displayPath = "~/" + rel
 				} else if rel == "." {
@@ -872,7 +1110,14 @@ func (m model) renderBookmarksView() string {
 				}
 			}
 
-			line := fmt.Sprintf("%s %s (%s)", icon, name, displayPath)
+			// Show frecency score
+			frecencyInfo := ""
+			if bs.score > 0 {
+				frecencyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("141"))
+				frecencyInfo = " " + frecencyStyle.Render(fmt.Sprintf("[%d visits]", bs.score))
+			}
+
+			line := fmt.Sprintf("%s %s (%s)%s", icon, name, displayPath, frecencyInfo)
 			if i == m.bookmarksCursor {
 				selectedStyle := lipgloss.NewStyle().
 					Background(lipgloss.Color("57")).
@@ -1037,7 +1282,13 @@ func (m *model) openFile(path string) tea.Cmd {
 
 func (m *model) editFile(path string) tea.Cmd {
 	return func() tea.Msg {
-		editors := []string{"code", "vim", "nano", "vi"}
+		// Use configured editor if set, otherwise try defaults
+		editors := []string{}
+		if m.config.Editor != "" {
+			editors = append(editors, m.config.Editor)
+		}
+		editors = append(editors, "code", "vim", "nano", "vi")
+
 		for _, editor := range editors {
 			if _, err := exec.LookPath(editor); err == nil {
 				cmd := exec.Command(editor, path)
@@ -1070,24 +1321,14 @@ func (m *model) openInVSCode(path string) tea.Cmd {
 }
 
 func (m *model) copyPath(path string) {
-	// Platform-specific clipboard commands
-	var cmd *exec.Cmd
-	switch {
-	case commandExists("xclip"):
-		cmd = exec.Command("xclip", "-selection", "clipboard")
-	case commandExists("pbcopy"):
-		cmd = exec.Command("pbcopy")
-	case commandExists("clip"):
-		cmd = exec.Command("clip")
-	}
-
-	if cmd != nil {
-		cmd.Stdin = strings.NewReader(path)
-		err := cmd.Run()
-		if err == nil {
-			m.statusMsg = fmt.Sprintf("Copied: %s", path)
-			m.statusExpiry = time.Now().Add(2 * time.Second)
-		}
+	// Use clipboard library for cross-platform support
+	err := clipboard.WriteAll(path)
+	if err == nil {
+		m.statusMsg = fmt.Sprintf("Copied: %s", path)
+		m.statusExpiry = time.Now().Add(2 * time.Second)
+	} else {
+		m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
+		m.statusExpiry = time.Now().Add(3 * time.Second)
 	}
 }
 
@@ -1282,6 +1523,9 @@ func loadConfig() *Config {
 		Bookmarks:      []string{rootPath},
 		ShowHidden:     false,
 		PreviewEnabled: true,
+		Editor:         "",
+		Frecency:       make(map[string]int),
+		LastVisited:    make(map[string]string),
 	}
 
 	// Try to load existing config
@@ -1296,6 +1540,14 @@ func loadConfig() *Config {
 	if err := json.Unmarshal(data, config); err != nil {
 		// Return default config if parsing fails
 		return defaultConfig
+	}
+
+	// Initialize maps if they're nil
+	if config.Frecency == nil {
+		config.Frecency = make(map[string]int)
+	}
+	if config.LastVisited == nil {
+		config.LastVisited = make(map[string]string)
 	}
 
 	// Ensure root path is bookmarked
@@ -1330,6 +1582,100 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// addToHistory adds a directory to navigation history
+func (m *model) addToHistory(dir string) {
+	// Don't add if it's the same as current position
+	if m.historyIndex < len(m.dirHistory) && m.dirHistory[m.historyIndex] == dir {
+		return
+	}
+
+	// Truncate forward history if we're not at the end
+	if m.historyIndex < len(m.dirHistory)-1 {
+		m.dirHistory = m.dirHistory[:m.historyIndex+1]
+	}
+
+	// Add new directory
+	m.dirHistory = append(m.dirHistory, dir)
+	m.historyIndex = len(m.dirHistory) - 1
+
+	// Limit history size to 100 entries
+	if len(m.dirHistory) > 100 {
+		m.dirHistory = m.dirHistory[1:]
+		m.historyIndex--
+	}
+}
+
+// updateFrecency updates the frecency score for a directory
+func (m *model) updateFrecency(dir string) {
+	if m.config.Frecency == nil {
+		m.config.Frecency = make(map[string]int)
+	}
+	if m.config.LastVisited == nil {
+		m.config.LastVisited = make(map[string]string)
+	}
+
+	// Increment visit count
+	m.config.Frecency[dir]++
+
+	// Update last visited timestamp
+	m.config.LastVisited[dir] = time.Now().Format(time.RFC3339)
+
+	// Save config periodically (every 10 visits)
+	if m.config.Frecency[dir]%10 == 0 {
+		saveConfig(m.config)
+	}
+}
+
+// getGitBranch returns the current git branch name
+func getGitBranch(dir string) string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = dir
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// highlightMatches highlights matched characters in a string
+func highlightMatches(text string, matches []int) string {
+	if len(matches) == 0 {
+		return text
+	}
+
+	highlightStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("226")).
+		Bold(true)
+
+	runes := []rune(text)
+	var result strings.Builder
+	matchMap := make(map[int]bool)
+
+	for _, idx := range matches {
+		if idx < len(runes) {
+			matchMap[idx] = true
+		}
+	}
+
+	for i, r := range runes {
+		if matchMap[i] {
+			result.WriteString(highlightStyle.Render(string(r)))
+		} else {
+			result.WriteRune(r)
+		}
+	}
+
+	return result.String()
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func main() {
