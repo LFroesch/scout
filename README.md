@@ -9,7 +9,6 @@ A lightning-fast TUI file explorer and fuzzy finder for developers. Navigate, se
 - **👁️ Live Preview** - See file contents without opening, with scrollable preview
 - **🔀 Enhanced Git Integration** - Shows modified files and current branch in your repository
 - **📁 Smart Navigation** - Keyboard-driven interface with vim-like controls
-- **⏮️ Directory History** - Navigate back/forward through visited directories (Alt+Left/Right)
 - **🎯 Quick Actions** - Open, edit, copy path with single keystrokes
 - **⚙️ Configurable Editor** - Set your preferred editor in config file
 - **💻 VS Code Integration** - Open files/directories as VS Code workspaces with 'o' key
@@ -64,8 +63,6 @@ scout /path/to/directory
 - **`enter/l/→`** - Open directory or file
 - **`esc/h/←`** - Go to parent directory (respects root path limit)
 - **`~`** - Go to home directory
-- **`alt+←`** - Navigate back in history
-- **`alt+→`** - Navigate forward in history
 
 ### Search & Filter
 - **`/`** - Enter fuzzy search mode
@@ -92,8 +89,8 @@ scout /path/to/directory
 - **`H`** - Toggle hidden files
 - **`p`** - Toggle preview pane
 - **`r`** - Refresh current directory
-- **`ctrl+s`** - Scroll preview down
-- **`ctrl+w`** - Scroll preview up
+- **`ctrl+↓`** - Scroll preview down
+- **`ctrl+↑`** - Scroll preview up
 
 ### General
 - **`q/ctrl+c`** - Quit Scout
@@ -145,7 +142,7 @@ Scout automatically previews:
 Large files (>1MB) and binary files are not previewed for performance.
 
 ### Preview Navigation
-- Use **`ctrl+s`** and **`ctrl+w`** to scroll through long file contents
+- Use **`ctrl+↓`** and **`ctrl+↑`** to scroll through long file contents
 - Preview automatically wraps text to fit the terminal width
 - Scroll indicators show when more content is available above/below
 
@@ -234,7 +231,7 @@ Scout is designed to be fast:
 ```
 1. Navigate with `j/k` or `ctrl+d/u` for fast scrolling
 2. Preview shows on the right
-3. Use `ctrl+s/w` to scroll preview
+3. Use `ctrl+↑/↓` to scroll preview
 4. Press `p` to toggle preview
 5. Press `e` to edit selected file
 ```
@@ -249,15 +246,6 @@ Scout is designed to be fast:
 6. Navigate with `j/k`, press `enter` to go
 7. Press `o` to open in VS Code
 8. Press `d` to delete (with confirmation)
-```
-
-### Directory History Navigation
-```
-1. Navigate through several directories
-2. Press `alt+←` to go back to previous directory
-3. Press `alt+→` to go forward
-4. Works like browser back/forward buttons
-5. History persists during your session
 ```
 
 ### VS Code Integration
@@ -279,7 +267,6 @@ Scout is designed to be fast:
 - **Root boundary**: Configure `root_path` to prevent accidentally navigating above your work directory
 - **Recursive search**: Use `ctrl+r` in search mode to search your entire project - perfect for finding files deep in the tree
 - **Fast navigation**: Use `ctrl+d`/`ctrl+u` for half-page jumps, `ctrl+f`/`ctrl+b` for full-page
-- **History navigation**: Use `alt+←`/`alt+→` to quickly jump between frequently accessed directories
 - **Frecency magic**: The more you use Scout, the smarter your bookmarks become - most-used directories rise to the top
 - **Quick navigation**: Use `g`/`G` to jump to top/bottom of file lists
 - **Space optimization**: Hide preview with `p` for more file list space in narrow terminals
