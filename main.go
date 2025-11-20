@@ -764,14 +764,7 @@ func (m *model) previewFile(path string) string {
 		return preview.String()
 	}
 
-	lines := strings.Split(string(content), "\n")
-	maxLines := 30
-	if len(lines) > maxLines {
-		lines = lines[:maxLines]
-		preview.WriteString(fmt.Sprintf("%s\n...\n(Showing first %d lines)", strings.Join(lines, "\n"), maxLines))
-	} else {
-		preview.WriteString(string(content))
-	}
+	preview.WriteString(string(content))
 
 	return preview.String()
 }
