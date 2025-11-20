@@ -27,6 +27,31 @@ const (
 	modePreview
 	modeBookmarks
 	modeConfirmDelete
+	modeRename
+	modeCreateFile
+	modeCreateDir
+	modeCommand
+	modeSortMenu
+	modeConfirmFileDelete
+	modeGitCommit
+	modeContentSearch
+)
+
+type sortMode int
+
+const (
+	sortByName sortMode = iota
+	sortBySize
+	sortByDate
+	sortByType
+)
+
+type operationType int
+
+const (
+	opNone operationType = iota
+	opCopy
+	opCut
 )
 
 type fileItem struct {
@@ -59,6 +84,7 @@ type model struct {
 	bookmarksCursor     int
 	deleteBookmarkIndex int // Index of bookmark to delete
 	searchInput         textinput.Model
+	textInput           textinput.Model // For rename, create, command dialogs
 	width               int
 	height              int
 	showHidden          bool
@@ -70,11 +96,31 @@ type model struct {
 	gitBranch           string
 	statusMsg           string
 	statusExpiry        time.Time
-	dirHistory          []string // Navigation history
-	historyIndex        int      // Current position in history
-	recursiveSearch     bool     // Toggle for recursive vs current dir search
-	loading             bool     // Loading indicator
-	searchMatches       [][]int  // Character positions that matched in fuzzy search
+	dirHistory          []string      // Navigation history
+	historyIndex        int           // Current position in history
+	recursiveSearch     bool          // Toggle for recursive vs current dir search
+	loading             bool          // Loading indicator
+	searchMatches       [][]int       // Character positions that matched in fuzzy search
+	clipboard           []string      // Files in clipboard
+	clipboardOp         operationType // Copy or cut
+	sortBy              sortMode      // Current sort mode
+	sortMenuCursor      int           // Cursor in sort menu
+	dualPane            bool          // Dual pane mode enabled
+	activePane          int           // 0 = left, 1 = right
+	rightDir            string        // Right pane directory
+	rightFiles          []fileItem    // Right pane files
+	rightCursor         int           // Right pane cursor
+	rightScrollOffset   int           // Right pane scroll offset
+	permissions         bool          // Show permissions
+	contentSearchResults []contentSearchResult // Ripgrep search results
+	contentSearchCursor int           // Cursor in content search results
+}
+
+type contentSearchResult struct {
+	file    string
+	line    int
+	column  int
+	content string
 }
 
 func initialModel() model {
@@ -93,26 +139,42 @@ func initialModel() model {
 	ti.CharLimit = 256
 	ti.Width = 50
 
+	textIn := textinput.New()
+	textIn.CharLimit = 256
+	textIn.Width = 50
+
 	m := model{
-		mode:            modeNormal,
-		currentDir:      currentDir,
-		files:           []fileItem{},
-		cursor:          0,
-		previewScroll:   0,
-		bookmarksCursor: 0,
-		searchInput:     ti,
-		width:           0,
-		height:          0,
-		showHidden:      config.ShowHidden,
-		showPreview:     config.PreviewEnabled,
-		config:          config,
-		gitModified:     getGitModifiedFiles(currentDir),
-		gitBranch:       getGitBranch(currentDir),
-		dirHistory:      []string{currentDir},
-		historyIndex:    0,
-		recursiveSearch: false,
-		loading:         false,
-		searchMatches:   [][]int{},
+		mode:              modeNormal,
+		currentDir:        currentDir,
+		files:             []fileItem{},
+		cursor:            0,
+		previewScroll:     0,
+		bookmarksCursor:   0,
+		searchInput:       ti,
+		textInput:         textIn,
+		width:             0,
+		height:            0,
+		showHidden:        config.ShowHidden,
+		showPreview:       config.PreviewEnabled,
+		config:            config,
+		gitModified:       getGitModifiedFiles(currentDir),
+		gitBranch:         getGitBranch(currentDir),
+		dirHistory:        []string{currentDir},
+		historyIndex:      0,
+		recursiveSearch:   false,
+		loading:           false,
+		searchMatches:     [][]int{},
+		clipboard:         []string{},
+		clipboardOp:       opNone,
+		sortBy:            sortByName,
+		sortMenuCursor:    0,
+		dualPane:          false,
+		activePane:        0,
+		rightDir:          currentDir,
+		rightFiles:        []fileItem{},
+		rightCursor:       0,
+		rightScrollOffset: 0,
+		permissions:       false,
 	}
 
 	m.loadFiles()
@@ -166,19 +228,312 @@ func (m *model) loadFiles() {
 		m.files = append(m.files, item)
 	}
 
-	// Sort: directories first, then by name
-	sort.Slice(m.files, func(i, j int) bool {
-		if m.files[i].isDir != m.files[j].isDir {
-			return m.files[i].isDir
-		}
-		return strings.ToLower(m.files[i].name) < strings.ToLower(m.files[j].name)
-	})
+	// Sort based on current sort mode
+	m.sortFiles()
 
 	m.filteredFiles = m.files
 	m.updatePreview()
 
 	// Update frecency when visiting a directory
 	m.updateFrecency(m.currentDir)
+}
+
+func (m *model) sortFiles() {
+	sort.Slice(m.files, func(i, j int) bool {
+		// Keep ".." at top always
+		if m.files[i].name == ".." {
+			return true
+		}
+		if m.files[j].name == ".." {
+			return false
+		}
+
+		// Directories first (except for size sort)
+		if m.sortBy != sortBySize && m.files[i].isDir != m.files[j].isDir {
+			return m.files[i].isDir
+		}
+
+		// Apply sort mode
+		switch m.sortBy {
+		case sortBySize:
+			return m.files[i].size > m.files[j].size
+		case sortByDate:
+			return m.files[i].modTime.After(m.files[j].modTime)
+		case sortByType:
+			extI := strings.ToLower(filepath.Ext(m.files[i].name))
+			extJ := strings.ToLower(filepath.Ext(m.files[j].name))
+			if extI != extJ {
+				return extI < extJ
+			}
+			return strings.ToLower(m.files[i].name) < strings.ToLower(m.files[j].name)
+		default: // sortByName
+			return strings.ToLower(m.files[i].name) < strings.ToLower(m.files[j].name)
+		}
+	})
+}
+
+func (m *model) deleteSelectedFile() error {
+	if len(m.filteredFiles) == 0 || m.cursor >= len(m.filteredFiles) {
+		return fmt.Errorf("no file selected")
+	}
+
+	selected := m.filteredFiles[m.cursor]
+	if selected.name == ".." {
+		return fmt.Errorf("cannot delete parent directory")
+	}
+
+	// Try to move to trash first, fall back to permanent delete
+	if err := m.moveToTrash(selected.path); err != nil {
+		// Permanent delete
+		if selected.isDir {
+			return os.RemoveAll(selected.path)
+		}
+		return os.Remove(selected.path)
+	}
+	return nil
+}
+
+func (m *model) moveToTrash(path string) error {
+	// Try using trash-cli or gio trash on Linux
+	if commandExists("gio") {
+		cmd := exec.Command("gio", "trash", path)
+		return cmd.Run()
+	}
+	if commandExists("trash-put") {
+		cmd := exec.Command("trash-put", path)
+		return cmd.Run()
+	}
+	return fmt.Errorf("trash command not available")
+}
+
+func (m *model) renameFile(oldPath, newName string) error {
+	newPath := filepath.Join(filepath.Dir(oldPath), newName)
+	return os.Rename(oldPath, newPath)
+}
+
+func (m *model) createFile(name string) error {
+	path := filepath.Join(m.currentDir, name)
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	return file.Close()
+}
+
+func (m *model) createDir(name string) error {
+	path := filepath.Join(m.currentDir, name)
+	return os.Mkdir(path, 0755)
+}
+
+func (m *model) copyFiles() error {
+	for _, srcPath := range m.clipboard {
+		destPath := filepath.Join(m.currentDir, filepath.Base(srcPath))
+		if err := m.copyFileOrDir(srcPath, destPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *model) cutFiles() error {
+	for _, srcPath := range m.clipboard {
+		destPath := filepath.Join(m.currentDir, filepath.Base(srcPath))
+		if err := os.Rename(srcPath, destPath); err != nil {
+			// If rename fails (cross-device), copy then delete
+			if err := m.copyFileOrDir(srcPath, destPath); err != nil {
+				return err
+			}
+			if err := os.RemoveAll(srcPath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (m *model) copyFileOrDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if srcInfo.IsDir() {
+		return m.copyDir(src, dst)
+	}
+	return m.copyFile(src, dst)
+}
+
+func (m *model) copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	if _, err := os.ReadFile(src); err != nil {
+		return err
+	}
+
+	srcBytes, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(dst, srcBytes, 0644)
+}
+
+func (m *model) copyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := m.copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := m.copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (m *model) toggleSelection() {
+	if len(m.filteredFiles) == 0 || m.cursor >= len(m.filteredFiles) {
+		return
+	}
+
+	selected := &m.filteredFiles[m.cursor]
+	selected.selected = !selected.selected
+
+	// Also update in main files list
+	for i := range m.files {
+		if m.files[i].path == selected.path {
+			m.files[i].selected = selected.selected
+			break
+		}
+	}
+}
+
+func (m *model) getSelectedFiles() []string {
+	var selected []string
+	for _, file := range m.files {
+		if file.selected && file.name != ".." {
+			selected = append(selected, file.path)
+		}
+	}
+	return selected
+}
+
+func (m *model) clearSelections() {
+	for i := range m.files {
+		m.files[i].selected = false
+	}
+	for i := range m.filteredFiles {
+		m.filteredFiles[i].selected = false
+	}
+}
+
+func (m *model) searchFileContent(query string) error {
+	if !commandExists("rg") {
+		return fmt.Errorf("ripgrep (rg) not found - install it for content search")
+	}
+
+	// Run ripgrep
+	cmd := exec.Command("rg", "--line-number", "--column", "--no-heading", "--color=never", query, m.currentDir)
+	output, err := cmd.Output()
+	if err != nil {
+		// rg returns exit code 1 if no matches found
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			m.contentSearchResults = []contentSearchResult{}
+			return nil
+		}
+		return err
+	}
+
+	// Parse results
+	m.contentSearchResults = []contentSearchResult{}
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		// Format: file:line:column:content
+		parts := strings.SplitN(line, ":", 4)
+		if len(parts) >= 4 {
+			lineNum := 0
+			colNum := 0
+			fmt.Sscanf(parts[1], "%d", &lineNum)
+			fmt.Sscanf(parts[2], "%d", &colNum)
+
+			result := contentSearchResult{
+				file:    parts[0],
+				line:    lineNum,
+				column:  colNum,
+				content: parts[3],
+			}
+			m.contentSearchResults = append(m.contentSearchResults, result)
+		}
+	}
+
+	return nil
+}
+
+func (m *model) gitStageFile(path string) error {
+	cmd := exec.Command("git", "add", path)
+	cmd.Dir = m.currentDir
+	return cmd.Run()
+}
+
+func (m *model) gitUnstageFile(path string) error {
+	cmd := exec.Command("git", "reset", "HEAD", path)
+	cmd.Dir = m.currentDir
+	return cmd.Run()
+}
+
+func (m *model) gitDiff(path string) string {
+	// Get diff for file
+	cmd := exec.Command("git", "diff", "HEAD", path)
+	cmd.Dir = m.currentDir
+	output, err := cmd.Output()
+	if err != nil {
+		// Try unstaged diff
+		cmd = exec.Command("git", "diff", path)
+		cmd.Dir = m.currentDir
+		output, err = cmd.Output()
+		if err != nil {
+			return fmt.Sprintf("Error getting git diff: %v", err)
+		}
+	}
+
+	if len(output) == 0 {
+		return "No changes"
+	}
+
+	return string(output)
 }
 
 func (m *model) updateFilter() {
@@ -381,8 +736,13 @@ func (m *model) previewFile(path string) string {
 	preview.WriteString(fmt.Sprintf("Size: %s\n", formatFileSize(info.Size())))
 	preview.WriteString(fmt.Sprintf("Modified: %s\n", info.ModTime().Format("Jan 2, 2006 15:04")))
 
+	// Show git diff for modified files
 	if m.gitModified[path] {
 		preview.WriteString("Git: Modified\n")
+		preview.WriteString("\n--- Git Diff ---\n")
+		diff := m.gitDiff(path)
+		preview.WriteString(diff)
+		return preview.String()
 	}
 
 	preview.WriteString("\n")
@@ -501,6 +861,175 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Cancelled
 				m.mode = modeBookmarks
 				return m, nil
+			}
+			return m, nil
+
+		case modeConfirmFileDelete:
+			switch msg.String() {
+			case "y", "Y":
+				// Confirmed - delete the file
+				if err := m.deleteSelectedFile(); err != nil {
+					m.statusMsg = fmt.Sprintf("Error deleting: %v", err)
+					m.statusExpiry = time.Now().Add(3 * time.Second)
+				} else {
+					m.statusMsg = "File deleted"
+					m.statusExpiry = time.Now().Add(2 * time.Second)
+					m.loadFiles()
+				}
+				m.mode = modeNormal
+				return m, nil
+			case "n", "N", "esc":
+				m.mode = modeNormal
+				return m, nil
+			}
+			return m, nil
+
+		case modeRename:
+			switch msg.String() {
+			case "esc":
+				m.mode = modeNormal
+				m.textInput.SetValue("")
+				return m, nil
+			case "enter":
+				newName := m.textInput.Value()
+				if newName != "" && len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					selected := m.filteredFiles[m.cursor]
+					if err := m.renameFile(selected.path, newName); err != nil {
+						m.statusMsg = fmt.Sprintf("Error renaming: %v", err)
+						m.statusExpiry = time.Now().Add(3 * time.Second)
+					} else {
+						m.statusMsg = fmt.Sprintf("Renamed to: %s", newName)
+						m.statusExpiry = time.Now().Add(2 * time.Second)
+						m.loadFiles()
+					}
+				}
+				m.mode = modeNormal
+				m.textInput.SetValue("")
+				return m, nil
+			default:
+				m.textInput, cmd = m.textInput.Update(msg)
+				return m, cmd
+			}
+
+		case modeCreateFile:
+			switch msg.String() {
+			case "esc":
+				m.mode = modeNormal
+				m.textInput.SetValue("")
+				return m, nil
+			case "enter":
+				name := m.textInput.Value()
+				if name != "" {
+					if err := m.createFile(name); err != nil {
+						m.statusMsg = fmt.Sprintf("Error creating file: %v", err)
+						m.statusExpiry = time.Now().Add(3 * time.Second)
+					} else {
+						m.statusMsg = fmt.Sprintf("Created file: %s", name)
+						m.statusExpiry = time.Now().Add(2 * time.Second)
+						m.loadFiles()
+					}
+				}
+				m.mode = modeNormal
+				m.textInput.SetValue("")
+				return m, nil
+			default:
+				m.textInput, cmd = m.textInput.Update(msg)
+				return m, cmd
+			}
+
+		case modeCreateDir:
+			switch msg.String() {
+			case "esc":
+				m.mode = modeNormal
+				m.textInput.SetValue("")
+				return m, nil
+			case "enter":
+				name := m.textInput.Value()
+				if name != "" {
+					if err := m.createDir(name); err != nil {
+						m.statusMsg = fmt.Sprintf("Error creating directory: %v", err)
+						m.statusExpiry = time.Now().Add(3 * time.Second)
+					} else {
+						m.statusMsg = fmt.Sprintf("Created directory: %s", name)
+						m.statusExpiry = time.Now().Add(2 * time.Second)
+						m.loadFiles()
+					}
+				}
+				m.mode = modeNormal
+				m.textInput.SetValue("")
+				return m, nil
+			default:
+				m.textInput, cmd = m.textInput.Update(msg)
+				return m, cmd
+			}
+
+		case modeSortMenu:
+			switch msg.String() {
+			case "esc", "q":
+				m.mode = modeNormal
+				return m, nil
+			case "j", "down":
+				if m.sortMenuCursor < 3 {
+					m.sortMenuCursor++
+				}
+			case "k", "up":
+				if m.sortMenuCursor > 0 {
+					m.sortMenuCursor--
+				}
+			case "enter":
+				m.sortBy = sortMode(m.sortMenuCursor)
+				m.sortFiles()
+				m.filteredFiles = m.files
+				m.mode = modeNormal
+				sortNames := []string{"Name", "Size", "Date", "Type"}
+				m.statusMsg = fmt.Sprintf("Sorted by: %s", sortNames[m.sortBy])
+				m.statusExpiry = time.Now().Add(2 * time.Second)
+				return m, nil
+			}
+			return m, nil
+
+		case modeContentSearch:
+			switch msg.String() {
+			case "esc":
+				m.mode = modeNormal
+				m.textInput.SetValue("")
+				m.contentSearchResults = []contentSearchResult{}
+				return m, nil
+			case "enter":
+				query := m.textInput.Value()
+				if query != "" {
+					if err := m.searchFileContent(query); err != nil {
+						m.statusMsg = fmt.Sprintf("Search error: %v", err)
+						m.statusExpiry = time.Now().Add(3 * time.Second)
+						m.mode = modeNormal
+					} else {
+						m.statusMsg = fmt.Sprintf("Found %d results", len(m.contentSearchResults))
+						m.statusExpiry = time.Now().Add(2 * time.Second)
+						m.contentSearchCursor = 0
+						// Stay in content search mode to show results
+					}
+				}
+				m.textInput.SetValue("")
+				return m, nil
+			case "j", "down":
+				// Navigate results
+				if len(m.contentSearchResults) > 0 && m.contentSearchCursor < len(m.contentSearchResults)-1 {
+					m.contentSearchCursor++
+				}
+			case "k", "up":
+				// Navigate results
+				if m.contentSearchCursor > 0 {
+					m.contentSearchCursor--
+				}
+			case "o":
+				// Open file at result location
+				if len(m.contentSearchResults) > 0 && m.contentSearchCursor < len(m.contentSearchResults) {
+					result := m.contentSearchResults[m.contentSearchCursor]
+					return m, m.editFile(filepath.Join(m.currentDir, result.file))
+				}
+			default:
+				m.textInput, cmd = m.textInput.Update(msg)
+				return m, cmd
 			}
 			return m, nil
 
@@ -784,6 +1313,192 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.statusExpiry = time.Now().Add(2 * time.Second)
 					}
 				}
+
+			// File operations
+			case "D":
+				// Delete file/directory
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					selected := m.filteredFiles[m.cursor]
+					if selected.name != ".." {
+						m.mode = modeConfirmFileDelete
+					}
+				}
+
+			case "R":
+				// Rename file/directory
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					selected := m.filteredFiles[m.cursor]
+					if selected.name != ".." {
+						m.mode = modeRename
+						m.textInput.SetValue(selected.name)
+						m.textInput.Focus()
+						return m, textinput.Blink
+					}
+				}
+
+			case "n":
+				// Next key will determine action (nf = new file, nd = new dir)
+				// For simplicity, let's make 'n' followed by 'f' or 'd'
+				// We'll use a simple approach: N for new file, M for new directory
+				return m, nil
+
+			case "N":
+				// Create new file
+				m.mode = modeCreateFile
+				m.textInput.SetValue("")
+				m.textInput.Placeholder = "Enter filename..."
+				m.textInput.Focus()
+				return m, textinput.Blink
+
+			case "M":
+				// Create new directory
+				m.mode = modeCreateDir
+				m.textInput.SetValue("")
+				m.textInput.Placeholder = "Enter directory name..."
+				m.textInput.Focus()
+				return m, textinput.Blink
+
+			case "c":
+				// Copy - add selected files to clipboard
+				selected := m.getSelectedFiles()
+				if len(selected) == 0 && len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					// If nothing selected, copy current file
+					current := m.filteredFiles[m.cursor]
+					if current.name != ".." {
+						selected = []string{current.path}
+					}
+				}
+				if len(selected) > 0 {
+					m.clipboard = selected
+					m.clipboardOp = opCopy
+					m.statusMsg = fmt.Sprintf("Copied %d item(s)", len(selected))
+					m.statusExpiry = time.Now().Add(2 * time.Second)
+				}
+
+			case "x":
+				// Cut - add selected files to clipboard
+				selected := m.getSelectedFiles()
+				if len(selected) == 0 && len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					// If nothing selected, cut current file
+					current := m.filteredFiles[m.cursor]
+					if current.name != ".." {
+						selected = []string{current.path}
+					}
+				}
+				if len(selected) > 0 {
+					m.clipboard = selected
+					m.clipboardOp = opCut
+					m.statusMsg = fmt.Sprintf("Cut %d item(s)", len(selected))
+					m.statusExpiry = time.Now().Add(2 * time.Second)
+				}
+
+			case "P":
+				// Paste files from clipboard
+				if len(m.clipboard) > 0 {
+					var err error
+					if m.clipboardOp == opCopy {
+						err = m.copyFiles()
+					} else if m.clipboardOp == opCut {
+						err = m.cutFiles()
+						if err == nil {
+							m.clipboard = []string{}
+							m.clipboardOp = opNone
+						}
+					}
+					if err != nil {
+						m.statusMsg = fmt.Sprintf("Error pasting: %v", err)
+						m.statusExpiry = time.Now().Add(3 * time.Second)
+					} else {
+						m.statusMsg = "Pasted successfully"
+						m.statusExpiry = time.Now().Add(2 * time.Second)
+						m.loadFiles()
+					}
+				}
+
+			case " ":
+				// Toggle selection
+				m.toggleSelection()
+				// Move cursor down
+				if m.cursor < len(m.filteredFiles)-1 {
+					m.cursor++
+					m.updatePreview()
+				}
+
+			case "S":
+				// Open sort menu
+				m.mode = modeSortMenu
+				m.sortMenuCursor = int(m.sortBy)
+
+			case "T":
+				// Toggle dual pane mode
+				m.dualPane = !m.dualPane
+				if m.dualPane {
+					m.statusMsg = "Dual pane mode enabled"
+				} else {
+					m.statusMsg = "Dual pane mode disabled"
+				}
+				m.statusExpiry = time.Now().Add(2 * time.Second)
+
+			case "tab":
+				// Switch active pane in dual mode
+				if m.dualPane {
+					m.activePane = 1 - m.activePane
+				}
+
+			case "I":
+				// Toggle permissions display
+				m.permissions = !m.permissions
+				if m.permissions {
+					m.statusMsg = "Showing permissions"
+				} else {
+					m.statusMsg = "Hiding permissions"
+				}
+				m.statusExpiry = time.Now().Add(2 * time.Second)
+
+			case "ctrl+g":
+				// Content search (ripgrep)
+				m.mode = modeContentSearch
+				m.textInput.SetValue("")
+				m.textInput.Placeholder = "Search file contents..."
+				m.textInput.Focus()
+				return m, textinput.Blink
+
+			// Git operations
+			case "A":
+				// Git stage file
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					selected := m.filteredFiles[m.cursor]
+					if selected.name != ".." && !selected.isDir {
+						if err := m.gitStageFile(selected.path); err != nil {
+							m.statusMsg = fmt.Sprintf("Error staging: %v", err)
+							m.statusExpiry = time.Now().Add(3 * time.Second)
+						} else {
+							m.statusMsg = fmt.Sprintf("Staged: %s", selected.name)
+							m.statusExpiry = time.Now().Add(2 * time.Second)
+							// Refresh git status
+							m.gitModified = getGitModifiedFiles(m.currentDir)
+							m.updatePreview()
+						}
+					}
+				}
+
+			case "U":
+				// Git unstage file
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					selected := m.filteredFiles[m.cursor]
+					if selected.name != ".." && !selected.isDir {
+						if err := m.gitUnstageFile(selected.path); err != nil {
+							m.statusMsg = fmt.Sprintf("Error unstaging: %v", err)
+							m.statusExpiry = time.Now().Add(3 * time.Second)
+						} else {
+							m.statusMsg = fmt.Sprintf("Unstaged: %s", selected.name)
+							m.statusExpiry = time.Now().Add(2 * time.Second)
+							// Refresh git status
+							m.gitModified = getGitModifiedFiles(m.currentDir)
+							m.updatePreview()
+						}
+					}
+				}
 			}
 		}
 	}
@@ -803,20 +1518,40 @@ func (m model) View() string {
 
 	// Main content area
 	var mainContent string
-	if m.mode == modeBookmarks {
-		// Bookmarks overlay
+	switch m.mode {
+	case modeBookmarks:
 		mainContent = m.renderBookmarksView()
-	} else if m.mode == modeConfirmDelete {
-		// Confirmation dialog overlay
+	case modeConfirmDelete:
 		mainContent = m.renderConfirmDeleteView()
-	} else if m.showPreview {
-		// Split view
-		fileList := m.renderFileList(m.width / 2)
-		preview := m.renderPreview(m.width / 2)
-		mainContent = lipgloss.JoinHorizontal(lipgloss.Top, fileList, preview)
-	} else {
-		// Full width file list
-		mainContent = m.renderFileList(m.width)
+	case modeConfirmFileDelete:
+		mainContent = m.renderConfirmFileDeleteView()
+	case modeRename:
+		mainContent = m.renderRenameDialog()
+	case modeCreateFile:
+		mainContent = m.renderCreateFileDialog()
+	case modeCreateDir:
+		mainContent = m.renderCreateDirDialog()
+	case modeSortMenu:
+		mainContent = m.renderSortMenu()
+	case modeContentSearch:
+		mainContent = m.renderContentSearchView()
+	default:
+		if m.dualPane {
+			// Dual pane mode
+			leftPane := m.renderFileList(m.width / 2)
+			// For now, right pane shows same directory
+			// TODO: Implement independent right pane navigation
+			rightPane := m.renderFileList(m.width / 2)
+			mainContent = lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
+		} else if m.showPreview {
+			// Split view with preview
+			fileList := m.renderFileList(m.width / 2)
+			preview := m.renderPreview(m.width / 2)
+			mainContent = lipgloss.JoinHorizontal(lipgloss.Top, fileList, preview)
+		} else {
+			// Full width file list
+			mainContent = m.renderFileList(m.width)
+		}
 	}
 
 	// Status bar
@@ -954,6 +1689,12 @@ func (m model) renderFileList(width int) string {
 	for i := startIdx; i < endIdx && i < len(m.filteredFiles); i++ {
 		item := m.filteredFiles[i]
 
+		// Selection checkbox
+		checkbox := "  "
+		if item.selected {
+			checkbox = "✓ "
+		}
+
 		// Icon
 		icon := "📄"
 		if item.isDir {
@@ -981,11 +1722,22 @@ func (m model) renderFileList(width int) string {
 			displayName = highlightMatches(name, m.searchMatches[i])
 		}
 
-		if len(name) > width-10 {
-			displayName = displayName[:min(len(displayName), width-13)] + "..."
+		// Add file size for files
+		sizeStr := ""
+		if !item.isDir && item.name != ".." {
+			sizeStr = " " + formatFileSize(item.size)
 		}
 
-		line := fmt.Sprintf("%s %s%s", icon, displayName, gitStatus)
+		// Truncate name if needed
+		maxNameLen := width - 25 // Account for checkbox, icon, size, etc
+		if maxNameLen < 10 {
+			maxNameLen = 10
+		}
+		if len(name) > maxNameLen {
+			displayName = displayName[:min(len(displayName), maxNameLen-3)] + "..."
+		}
+
+		line := fmt.Sprintf("%s%s %s%s%s", checkbox, icon, displayName, sizeStr, gitStatus)
 
 		// Style based on selection
 		if i == m.cursor {
@@ -1728,6 +2480,237 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (m model) renderConfirmFileDeleteView() string {
+	dialogWidth := 60
+	dialogHeight := 8
+
+	if len(m.filteredFiles) == 0 || m.cursor >= len(m.filteredFiles) {
+		return "Error: No file selected"
+	}
+
+	file := m.filteredFiles[m.cursor]
+	fileName := file.name
+
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("196")).
+		Width(dialogWidth).
+		Height(dialogHeight).
+		Padding(1).
+		Align(lipgloss.Center)
+
+	var dialogContent []string
+	dialogContent = append(dialogContent, "⚠️  Confirm Delete")
+	dialogContent = append(dialogContent, "")
+
+	fileType := "file"
+	if file.isDir {
+		fileType = "directory"
+	}
+	dialogContent = append(dialogContent, fmt.Sprintf("Delete %s: %s", fileType, fileName))
+	dialogContent = append(dialogContent, "")
+
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
+	confirmText := fmt.Sprintf("%s Yes  %s No  %s Cancel",
+		keyStyle.Render("y:"),
+		keyStyle.Render("n:"),
+		keyStyle.Render("esc:"))
+	dialogContent = append(dialogContent, confirmText)
+
+	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
+	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m model) renderRenameDialog() string {
+	dialogWidth := 60
+	dialogHeight := 6
+
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("99")).
+		Width(dialogWidth).
+		Height(dialogHeight).
+		Padding(1)
+
+	var dialogContent []string
+	dialogContent = append(dialogContent, "✏️  Rename")
+	dialogContent = append(dialogContent, "")
+	dialogContent = append(dialogContent, m.textInput.View())
+	dialogContent = append(dialogContent, "")
+	dialogContent = append(dialogContent, "Press Enter to confirm, Esc to cancel")
+
+	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
+	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m model) renderCreateFileDialog() string {
+	dialogWidth := 60
+	dialogHeight := 6
+
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("99")).
+		Width(dialogWidth).
+		Height(dialogHeight).
+		Padding(1)
+
+	var dialogContent []string
+	dialogContent = append(dialogContent, "📄 Create New File")
+	dialogContent = append(dialogContent, "")
+	dialogContent = append(dialogContent, m.textInput.View())
+	dialogContent = append(dialogContent, "")
+	dialogContent = append(dialogContent, "Press Enter to confirm, Esc to cancel")
+
+	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
+	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m model) renderCreateDirDialog() string {
+	dialogWidth := 60
+	dialogHeight := 6
+
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("99")).
+		Width(dialogWidth).
+		Height(dialogHeight).
+		Padding(1)
+
+	var dialogContent []string
+	dialogContent = append(dialogContent, "📁 Create New Directory")
+	dialogContent = append(dialogContent, "")
+	dialogContent = append(dialogContent, m.textInput.View())
+	dialogContent = append(dialogContent, "")
+	dialogContent = append(dialogContent, "Press Enter to confirm, Esc to cancel")
+
+	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
+	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m model) renderSortMenu() string {
+	dialogWidth := 40
+	dialogHeight := 10
+
+	menuStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("99")).
+		Width(dialogWidth).
+		Height(dialogHeight).
+		Padding(1)
+
+	var menuItems []string
+	menuItems = append(menuItems, "📊 Sort By")
+	menuItems = append(menuItems, "")
+
+	sortOptions := []string{"Name", "Size", "Date", "Type"}
+	for i, option := range sortOptions {
+		prefix := "  "
+		if i == m.sortMenuCursor {
+			prefix = "▶ "
+		}
+		current := ""
+		if i == int(m.sortBy) {
+			current = " ✓"
+		}
+		menuItems = append(menuItems, fmt.Sprintf("%s%s%s", prefix, option, current))
+	}
+
+	menuItems = append(menuItems, "")
+	menuItems = append(menuItems, "Enter: Select • Esc: Cancel")
+
+	menu := menuStyle.Render(strings.Join(menuItems, "\n"))
+	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, menu)
+}
+
+func (m model) renderContentSearchView() string {
+	availableHeight := m.height - 8
+	if availableHeight < 3 {
+		availableHeight = 3
+	}
+
+	searchStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("99")).
+		Width(m.width - 2).
+		Height(availableHeight + 2).
+		Padding(1)
+
+	var content []string
+
+	// Show search input if no results yet
+	if len(m.contentSearchResults) == 0 {
+		content = append(content, "🔍 Content Search (ripgrep)")
+		content = append(content, "")
+		content = append(content, m.textInput.View())
+		content = append(content, "")
+		content = append(content, "Type your search query and press Enter")
+		content = append(content, "")
+		content = append(content, "Esc: Cancel")
+	} else {
+		// Show results
+		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
+		header := fmt.Sprintf("🔍 Content Search Results (%d found) - %s navigate • %s open • %s close",
+			len(m.contentSearchResults),
+			keyStyle.Render("↑↓:"),
+			keyStyle.Render("o:"),
+			keyStyle.Render("esc:"))
+		content = append(content, header)
+		content = append(content, "")
+
+		// Show results with cursor
+		visibleResults := availableHeight - 4
+		if visibleResults < 1 {
+			visibleResults = 1
+		}
+
+		startIdx := m.contentSearchCursor
+		if startIdx > len(m.contentSearchResults)-visibleResults {
+			startIdx = len(m.contentSearchResults) - visibleResults
+		}
+		if startIdx < 0 {
+			startIdx = 0
+		}
+
+		endIdx := startIdx + visibleResults
+		if endIdx > len(m.contentSearchResults) {
+			endIdx = len(m.contentSearchResults)
+		}
+
+		for i := startIdx; i < endIdx; i++ {
+			result := m.contentSearchResults[i]
+			cursor := "  "
+			if i == m.contentSearchCursor {
+				cursor = "▶ "
+			}
+
+			line := fmt.Sprintf("%s%s:%d:%d - %s",
+				cursor,
+				filepath.Base(result.file),
+				result.line,
+				result.column,
+				strings.TrimSpace(result.content))
+
+			// Truncate if too long
+			maxLen := m.width - 8
+			if len(line) > maxLen {
+				line = line[:maxLen-3] + "..."
+			}
+
+			if i == m.contentSearchCursor {
+				selectedStyle := lipgloss.NewStyle().
+					Background(lipgloss.Color("57")).
+					Foreground(lipgloss.Color("230")).
+					Width(m.width - 6)
+				line = selectedStyle.Render(line)
+			}
+
+			content = append(content, line)
+		}
+	}
+
+	return searchStyle.Render(strings.Join(content, "\n"))
 }
 
 func main() {
