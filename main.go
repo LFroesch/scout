@@ -1649,7 +1649,8 @@ func (m model) renderFileList(width int) string {
 		// Git status
 		gitStatus := ""
 		if m.gitModified[item.path] {
-			gitStatus = " [M]"
+			modifiedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+			gitStatus = " " + modifiedStyle.Render("[M]")
 		}
 
 		// Format item with highlighting if in search mode
