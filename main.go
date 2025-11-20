@@ -1112,7 +1112,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			case "ctrl+d":
-				// Half-page down
+				// Half-page down (skip preview update for performance)
 				pageSize := (m.height - 9) / 2
 				if pageSize < 1 {
 					pageSize = 5
@@ -1124,10 +1124,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor < 0 {
 					m.cursor = 0
 				}
-				m.updatePreview()
 
 			case "ctrl+u":
-				// Half-page up
+				// Half-page up (skip preview update for performance)
 				pageSize := (m.height - 9) / 2
 				if pageSize < 1 {
 					pageSize = 5
@@ -1136,10 +1135,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor < 0 {
 					m.cursor = 0
 				}
-				m.updatePreview()
 
 			case "ctrl+f":
-				// Full-page down
+				// Full-page down (skip preview update for performance)
 				pageSize := m.height - 9
 				if pageSize < 1 {
 					pageSize = 10
@@ -1151,10 +1149,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor < 0 {
 					m.cursor = 0
 				}
-				m.updatePreview()
 
 			case "ctrl+b":
-				// Full-page up
+				// Full-page up (skip preview update for performance)
 				pageSize := m.height - 9
 				if pageSize < 1 {
 					pageSize = 10
@@ -1163,7 +1160,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor < 0 {
 					m.cursor = 0
 				}
-				m.updatePreview()
 
 			case "s", "alt+down":
 				// Scroll preview down
