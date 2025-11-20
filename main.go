@@ -1031,7 +1031,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "s", "alt+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
-					availableHeight := m.height - 8
+					availableHeight := m.height - 9
 					if availableHeight < 1 {
 						availableHeight = 3
 					}
@@ -1078,7 +1078,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "ctrl+d":
 				// Half-page down
-				pageSize := (m.height - 8) / 2
+				pageSize := (m.height - 9) / 2
 				if pageSize < 1 {
 					pageSize = 5
 				}
@@ -1093,7 +1093,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "ctrl+u":
 				// Half-page up
-				pageSize := (m.height - 8) / 2
+				pageSize := (m.height - 9) / 2
 				if pageSize < 1 {
 					pageSize = 5
 				}
@@ -1105,7 +1105,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "ctrl+f":
 				// Full-page down
-				pageSize := m.height - 8
+				pageSize := m.height - 9
 				if pageSize < 1 {
 					pageSize = 10
 				}
@@ -1120,7 +1120,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "ctrl+b":
 				// Full-page up
-				pageSize := m.height - 8
+				pageSize := m.height - 9
 				if pageSize < 1 {
 					pageSize = 10
 				}
@@ -1133,7 +1133,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "s", "alt+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
-					availableHeight := m.height - 8
+					availableHeight := m.height - 9
 					if availableHeight < 3 {
 						availableHeight = 3
 					}
@@ -1585,7 +1585,7 @@ func (m model) renderHeader() string {
 
 func (m model) renderFileList(width int) string {
 	// Use same height calculation as preview for consistency
-	availableHeight := m.height - 8
+	availableHeight := m.height - 9
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
@@ -1709,7 +1709,7 @@ func (m model) renderFileList(width int) string {
 func (m model) renderPreview(width int) string {
 	// Calculate available height more conservatively
 	// Header(1) + Status(1) + borders(2) + padding(2) + buffer(2) = 8
-	availableHeight := m.height - 8
+	availableHeight := m.height - 9
 	if availableHeight < 3 {
 		availableHeight = 3 // minimum height
 	}
@@ -1790,7 +1790,7 @@ func (m model) renderPreview(width int) string {
 
 func (m model) renderBookmarksView() string {
 	// Calculate available height
-	availableHeight := m.height - 8
+	availableHeight := m.height - 9
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
@@ -1910,7 +1910,7 @@ func (m model) renderConfirmDeleteView() string {
 	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
 
 	// Center the dialog on screen
-	dialogBox := lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+	dialogBox := lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
 
 	return dialogBox
 }
@@ -1959,8 +1959,11 @@ func (m model) renderStatusBar() string {
 			keyStyle.Render("esc:"))
 		helpPlainText = "↑↓: navigate • enter: go • o: vscode • d: delete • esc: exit"
 	} else {
+		// Two-row footer with right-aligned hints
 		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-		help = fmt.Sprintf("%s nav • %s search • %s open • %s edit • %s vscode • %s rename • %s delete • %s new • %s copy/cut • %s paste • %s select • %s preview • %s bookmarks • %s sort • %s help",
+
+		// Row 1 hints
+		row1Hints := fmt.Sprintf("%s nav • %s search • %s open • %s edit • %s vscode • %s rename • %s delete • %s new",
 			keyStyle.Render("↑↓:"),
 			keyStyle.Render("/:"),
 			keyStyle.Render("enter:"),
@@ -1968,7 +1971,11 @@ func (m model) renderStatusBar() string {
 			keyStyle.Render("o:"),
 			keyStyle.Render("R:"),
 			keyStyle.Render("D:"),
-			keyStyle.Render("N/M:"),
+			keyStyle.Render("N/M:"))
+		row1HintsPlain := "↑↓: nav • /: search • enter: open • e: edit • o: vscode • R: rename • D: delete • N/M: new"
+
+		// Row 2 hints
+		row2Hints := fmt.Sprintf("%s copy/cut • %s paste • %s select • %s preview • %s bookmarks • %s sort • %s help",
 			keyStyle.Render("c/x:"),
 			keyStyle.Render("P:"),
 			keyStyle.Render("space:"),
@@ -1976,27 +1983,43 @@ func (m model) renderStatusBar() string {
 			keyStyle.Render("b:"),
 			keyStyle.Render("S:"),
 			keyStyle.Render("?:"))
-		helpPlainText = "↑↓: nav • /: search • enter: open • e: edit • o: vscode • R: rename • D: delete • N/M: new • c/x: copy/cut • P: paste • space: select • p: preview • b: bookmarks • S: sort • ?: help"
+		row2HintsPlain := "c/x: copy/cut • P: paste • space: select • p: preview • b: bookmarks • S: sort • ?: help"
+
+		// Build row 1: leftInfo + status + right-aligned hints
+		leftContent := leftInfo
+		if center != "" {
+			leftContent += "  " + center
+		}
+		spacingRow1 := m.width - len(leftContent) - len(row1HintsPlain) - 2
+		if spacingRow1 < 2 {
+			spacingRow1 = 2
+		}
+		row1 := leftContent + strings.Repeat(" ", spacingRow1) + row1Hints
+
+		// Build row 2: only right-aligned hints
+		spacingRow2 := m.width - len(row2HintsPlain) - 2
+		if spacingRow2 < 0 {
+			spacingRow2 = 0
+		}
+		row2 := strings.Repeat(" ", spacingRow2) + row2Hints
+
+		combined := row1 + "\n" + row2
+		return statusStyle.Render(combined)
 	}
 
-	// Combine sections - use fixed widths to avoid overlap
-	leftWidth := len(leftInfo)
-	rightWidth := len(helpPlainText)
-	centerWidth := m.width - leftWidth - rightWidth - 6 // account for padding
-
-	if centerWidth < 0 {
-		centerWidth = 0
+	// Single row for bookmark mode
+	padding := m.width - len(leftInfo) - len(helpPlainText) - 2
+	if padding < 2 {
+		padding = 2
 	}
-
-	// Create sections without background first
-	leftSection := lipgloss.NewStyle().Width(leftWidth + 2).Render(leftInfo)
-	centerSection := lipgloss.NewStyle().Width(centerWidth).Align(lipgloss.Center).Render(center)
-	rightSection := lipgloss.NewStyle().Width(rightWidth + 2).Align(lipgloss.Right).Render(help)
-
-	// Join them together
-	combined := lipgloss.JoinHorizontal(lipgloss.Top, leftSection, centerSection, rightSection)
-
-	// Apply full-width background to entire status bar
+	if center != "" {
+		leftInfo += "  " + center
+		padding = m.width - len(leftInfo) - len(helpPlainText) - 2
+		if padding < 2 {
+			padding = 2
+		}
+	}
+	combined := leftInfo + strings.Repeat(" ", padding) + help
 	return statusStyle.Render(combined)
 }
 
@@ -2466,7 +2489,7 @@ func (m model) renderConfirmFileDeleteView() string {
 	dialogContent = append(dialogContent, confirmText)
 
 	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
 }
 
 func (m model) renderRenameDialog() string {
@@ -2488,7 +2511,7 @@ func (m model) renderRenameDialog() string {
 	dialogContent = append(dialogContent, "Press Enter to confirm, Esc to cancel")
 
 	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
 }
 
 func (m model) renderCreateFileDialog() string {
@@ -2510,7 +2533,7 @@ func (m model) renderCreateFileDialog() string {
 	dialogContent = append(dialogContent, "Press Enter to confirm, Esc to cancel")
 
 	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
 }
 
 func (m model) renderCreateDirDialog() string {
@@ -2532,7 +2555,7 @@ func (m model) renderCreateDirDialog() string {
 	dialogContent = append(dialogContent, "Press Enter to confirm, Esc to cancel")
 
 	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
 }
 
 func (m model) renderSortMenu() string {
@@ -2567,11 +2590,11 @@ func (m model) renderSortMenu() string {
 	menuItems = append(menuItems, "Enter: Select • Esc: Cancel")
 
 	menu := menuStyle.Render(strings.Join(menuItems, "\n"))
-	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, menu)
+	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, menu)
 }
 
 func (m model) renderHelpView() string {
-	availableHeight := m.height - 8
+	availableHeight := m.height - 9
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
@@ -2653,11 +2676,11 @@ func (m model) renderHelpView() string {
 	helpContent = append(helpContent, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Press esc, q, or ? to close this help screen"))
 
 	help := helpStyle.Render(strings.Join(helpContent, "\n"))
-	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, help)
+	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, help)
 }
 
 func (m model) renderContentSearchView() string {
-	availableHeight := m.height - 8
+	availableHeight := m.height - 9
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
