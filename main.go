@@ -1590,27 +1590,29 @@ func (m model) renderFileList(width int) string {
 		availableHeight = 3
 	}
 
-	listStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Width(width-2).
-		Height(availableHeight+2).
-		Padding(0, 1)
-
-	var items []string
-
-	// Add sticky header with directory and item count
+	// Sticky header (outside the scrollable area)
 	dirName := filepath.Base(m.currentDir)
 	if dirName == "" || dirName == "." {
 		dirName = m.currentDir
 	}
-	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-	header := fmt.Sprintf("📁 %s  •  Items: %d", dirName, len(m.filteredFiles))
-	items = append(items, headerStyle.Render(header))
-	items = append(items, "") // Empty line for spacing
+	headerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("99")).
+		Bold(true).
+		Width(width - 4).
+		Padding(0, 1)
+	header := headerStyle.Render(fmt.Sprintf("📁 %s  •  Items: %d", dirName, len(m.filteredFiles)))
 
-	// Calculate visible range (reduced by 2 for header)
-	visibleHeight := availableHeight - 2
+	// Scrollable file list (reduced height for header)
+	listHeight := availableHeight - 1 // Reserve 1 line for header
+	listStyle := lipgloss.NewStyle().
+		BorderForeground(lipgloss.Color("240")).
+		Width(width-2).
+		Padding(0, 1)
+
+	var items []string
+
+	// Calculate visible range
+	visibleHeight := listHeight
 	startIdx := m.scrollOffset
 	endIdx := startIdx + visibleHeight
 
@@ -1714,7 +1716,17 @@ func (m model) renderFileList(width int) string {
 		items = append(items, "▼ More files below...")
 	}
 
-	return listStyle.Render(strings.Join(items, "\n"))
+	fileList := listStyle.Render(strings.Join(items, "\n"))
+
+	// Combine header and file list with border
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Width(width - 2).
+		Height(availableHeight + 2)
+
+	combined := header + "\n" + fileList
+	return borderStyle.Render(combined)
 }
 
 func (m model) renderPreview(width int) string {
