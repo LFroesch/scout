@@ -119,8 +119,8 @@ type model struct {
 	contentSearchCursor int           // Cursor in content search results
 	previewPending      bool          // Preview update pending
 	previewCursor       int           // Cursor position preview is showing
-	lastRenderTime      time.Time     // Last time View() was rendered
-	cachedView          string        // Cached view output for throttling
+	lastCursorMove      time.Time     // Last time cursor moved
+	scrollingFast       bool          // Currently in fast scroll mode
 }
 
 type contentSearchResult struct {
@@ -614,7 +614,33 @@ func (m *model) recursiveSearchFiles(query string) {
 }
 
 func previewUpdateAfterDelay() tea.Cmd {
-	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(250*time.Millisecond, func(t time.Time) tea.Msg {
+		return previewUpdateMsg{}
+	})
+}
+
+// Helper to handle cursor movement with fast-scroll detection
+func (m *model) moveCursor(newPos int) tea.Cmd {
+	now := time.Now()
+
+	// Detect fast scrolling: if last move was less than 100ms ago
+	if !m.lastCursorMove.IsZero() && now.Sub(m.lastCursorMove).Milliseconds() < 100 {
+		m.scrollingFast = true
+	} else {
+		m.scrollingFast = false
+	}
+
+	m.lastCursorMove = now
+	m.cursor = newPos
+
+	// Only schedule preview update if NOT scrolling fast
+	if !m.scrollingFast {
+		m.previewPending = true
+		return previewUpdateAfterDelay()
+	}
+
+	// If scrolling fast, schedule a delayed check to see if scrolling stopped
+	return tea.Tick(250*time.Millisecond, func(t time.Time) tea.Msg {
 		return previewUpdateMsg{}
 	})
 }
@@ -804,9 +830,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case previewUpdateMsg:
-		// Delayed preview update - only execute if cursor hasn't moved since
-		if m.previewPending && m.cursor != m.previewCursor {
+		// Only update preview if scrolling has actually stopped
+		now := time.Now()
+		timeSinceLastMove := now.Sub(m.lastCursorMove).Milliseconds()
+
+		// If it's been >200ms since last cursor move, scrolling has stopped
+		if timeSinceLastMove > 200 && m.cursor != m.previewCursor {
 			m.updatePreview()
+		} else if timeSinceLastMove <= 200 {
+			// Still scrolling, check again later
+			return m, previewUpdateAfterDelay()
 		}
 		return m, nil
 
@@ -1124,75 +1157,67 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "j", "down":
 				if m.cursor < len(m.filteredFiles)-1 {
-					m.cursor++
-					m.previewPending = true
-					return m, previewUpdateAfterDelay()
+					return m, m.moveCursor(m.cursor + 1)
 				}
 
 			case "k", "up":
 				if m.cursor > 0 {
-					m.cursor--
-					m.previewPending = true
-					return m, previewUpdateAfterDelay()
+					return m, m.moveCursor(m.cursor - 1)
 				}
 
 			case "ctrl+d":
-				// Half-page down (delayed preview for performance)
+				// Half-page down
 				pageSize := (m.height - 9) / 2
 				if pageSize < 1 {
 					pageSize = 5
 				}
-				m.cursor += pageSize
-				if m.cursor >= len(m.filteredFiles) {
-					m.cursor = len(m.filteredFiles) - 1
+				newPos := m.cursor + pageSize
+				if newPos >= len(m.filteredFiles) {
+					newPos = len(m.filteredFiles) - 1
 				}
-				if m.cursor < 0 {
-					m.cursor = 0
+				if newPos < 0 {
+					newPos = 0
 				}
-				m.previewPending = true
-				return m, previewUpdateAfterDelay()
+				return m, m.moveCursor(newPos)
 
 			case "ctrl+u":
-				// Half-page up (delayed preview for performance)
+				// Half-page up
 				pageSize := (m.height - 9) / 2
 				if pageSize < 1 {
 					pageSize = 5
 				}
-				m.cursor -= pageSize
-				if m.cursor < 0 {
-					m.cursor = 0
+				newPos := m.cursor - pageSize
+				if newPos < 0 {
+					newPos = 0
 				}
-				m.previewPending = true
-				return m, previewUpdateAfterDelay()
+				return m, m.moveCursor(newPos)
 
 			case "ctrl+f":
-				// Full-page down (delayed preview for performance)
+				// Full-page down
 				pageSize := m.height - 9
 				if pageSize < 1 {
 					pageSize = 10
 				}
-				m.cursor += pageSize
-				if m.cursor >= len(m.filteredFiles) {
-					m.cursor = len(m.filteredFiles) - 1
+				newPos := m.cursor + pageSize
+				if newPos >= len(m.filteredFiles) {
+					newPos = len(m.filteredFiles) - 1
 				}
-				if m.cursor < 0 {
-					m.cursor = 0
+				if newPos < 0 {
+					newPos = 0
 				}
-				m.previewPending = true
-				return m, previewUpdateAfterDelay()
+				return m, m.moveCursor(newPos)
 
 			case "ctrl+b":
-				// Full-page up (delayed preview for performance)
+				// Full-page up
 				pageSize := m.height - 9
 				if pageSize < 1 {
 					pageSize = 10
 				}
-				m.cursor -= pageSize
-				if m.cursor < 0 {
-					m.cursor = 0
+				newPos := m.cursor - pageSize
+				if newPos < 0 {
+					newPos = 0
 				}
-				m.previewPending = true
-				return m, previewUpdateAfterDelay()
+				return m, m.moveCursor(newPos)
 
 			case "s", "alt+down":
 				// Scroll preview down
@@ -1217,15 +1242,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			case "g":
-				m.cursor = 0
-				m.previewPending = true
-				return m, previewUpdateAfterDelay()
+				return m, m.moveCursor(0)
 
 			case "G":
 				if len(m.filteredFiles) > 0 {
-					m.cursor = len(m.filteredFiles) - 1
-					m.previewPending = true
-					return m, previewUpdateAfterDelay()
+					return m, m.moveCursor(len(m.filteredFiles) - 1)
 				}
 
 			case "enter", "l", "right":
@@ -1510,17 +1531,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) View() string {
-	// Render throttling: only re-render if enough time has passed
-	// This prevents VSCode terminal from getting overwhelmed during fast scrolling
-	const renderThrottleMs = 50 // 20fps max
-	now := time.Now()
-	if !m.lastRenderTime.IsZero() && now.Sub(m.lastRenderTime).Milliseconds() < renderThrottleMs {
-		// Not enough time has passed, return cached view
-		if m.cachedView != "" {
-			return m.cachedView
-		}
-	}
-
 	if m.width == 0 || m.height == 0 {
 		return "Loading..."
 	}
@@ -1579,10 +1589,6 @@ func (m *model) View() string {
 		mainContent,
 		statusBar,
 	)
-
-	// Cache the rendered view and update timestamp
-	m.cachedView = content
-	m.lastRenderTime = now
 
 	return content
 }
