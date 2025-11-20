@@ -1960,17 +1960,23 @@ func (m model) renderStatusBar() string {
 		helpPlainText = "↑↓: navigate • enter: go • o: vscode • d: delete • esc: exit"
 	} else {
 		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-		help = fmt.Sprintf("%s nav • %s search • %s open • %s rename • %s delete • %s new file/dir • %s copy • %s paste • %s help",
+		help = fmt.Sprintf("%s nav • %s search • %s open • %s edit • %s vscode • %s rename • %s delete • %s new • %s copy/cut • %s paste • %s select • %s preview • %s bookmarks • %s sort • %s help",
 			keyStyle.Render("↑↓:"),
 			keyStyle.Render("/:"),
 			keyStyle.Render("enter:"),
+			keyStyle.Render("e:"),
+			keyStyle.Render("o:"),
 			keyStyle.Render("R:"),
 			keyStyle.Render("D:"),
 			keyStyle.Render("N/M:"),
 			keyStyle.Render("c/x:"),
 			keyStyle.Render("P:"),
+			keyStyle.Render("space:"),
+			keyStyle.Render("p:"),
+			keyStyle.Render("b:"),
+			keyStyle.Render("S:"),
 			keyStyle.Render("?:"))
-		helpPlainText = "↑↓: nav • /: search • enter: open • R: rename • D: delete • N/M: new file/dir • c/x: copy • P: paste • ?: help"
+		helpPlainText = "↑↓: nav • /: search • enter: open • e: edit • o: vscode • R: rename • D: delete • N/M: new • c/x: copy/cut • P: paste • space: select • p: preview • b: bookmarks • S: sort • ?: help"
 	}
 
 	// Combine sections - use fixed widths to avoid overlap
