@@ -1591,7 +1591,7 @@ func (m model) renderFileList(width int) string {
 	}
 
 	listStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Width(width-2).
 		Height(availableHeight+2).
@@ -1726,7 +1726,7 @@ func (m model) renderPreview(width int) string {
 	}
 
 	previewStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Width(width-2).
 		Height(availableHeight+2).
@@ -1808,7 +1808,7 @@ func (m model) renderBookmarksView() string {
 
 	// Full width bookmarks panel
 	bookmarksStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(m.width - 2).
 		Height(availableHeight + 2).
@@ -1896,7 +1896,7 @@ func (m model) renderConfirmDeleteView() string {
 	bookmarkName := filepath.Base(bookmark)
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("196")). // Red border
 		Width(dialogWidth).
 		Height(dialogHeight).
@@ -2474,7 +2474,7 @@ func (m model) renderConfirmFileDeleteView() string {
 	fileName := file.name
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("196")).
 		Width(dialogWidth).
 		Height(dialogHeight).
@@ -2508,7 +2508,7 @@ func (m model) renderRenameDialog() string {
 	dialogHeight := 6
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(dialogWidth).
 		Height(dialogHeight).
@@ -2530,7 +2530,7 @@ func (m model) renderCreateFileDialog() string {
 	dialogHeight := 6
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(dialogWidth).
 		Height(dialogHeight).
@@ -2552,7 +2552,7 @@ func (m model) renderCreateDirDialog() string {
 	dialogHeight := 6
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(dialogWidth).
 		Height(dialogHeight).
@@ -2574,7 +2574,7 @@ func (m model) renderSortMenu() string {
 	dialogHeight := 10
 
 	menuStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(dialogWidth).
 		Height(dialogHeight).
@@ -2611,7 +2611,7 @@ func (m model) renderHelpView() string {
 	}
 
 	helpStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(m.width - 4).
 		Height(availableHeight + 2).
@@ -2697,7 +2697,7 @@ func (m model) renderContentSearchView() string {
 	}
 
 	searchStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(m.width - 2).
 		Height(availableHeight + 2).
