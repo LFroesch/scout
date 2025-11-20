@@ -119,6 +119,8 @@ type model struct {
 	contentSearchCursor int           // Cursor in content search results
 	previewPending      bool          // Preview update pending
 	previewCursor       int           // Cursor position preview is showing
+	lastRenderTime      time.Time     // Last time View() was rendered
+	cachedView          string        // Cached view output for throttling
 }
 
 type contentSearchResult struct {
@@ -748,11 +750,11 @@ func (m *model) previewFile(path string) string {
 	return preview.String()
 }
 
-func (m model) Init() tea.Cmd {
+func (m *model) Init() tea.Cmd {
 	return tea.SetWindowTitle("🔍 Scout - File Explorer")
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	// Clear expired status messages
@@ -1507,7 +1509,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) View() string {
+func (m *model) View() string {
+	// Render throttling: only re-render if enough time has passed
+	// This prevents VSCode terminal from getting overwhelmed during fast scrolling
+	const renderThrottleMs = 50 // 20fps max
+	now := time.Now()
+	if !m.lastRenderTime.IsZero() && now.Sub(m.lastRenderTime).Milliseconds() < renderThrottleMs {
+		// Not enough time has passed, return cached view
+		if m.cachedView != "" {
+			return m.cachedView
+		}
+	}
+
 	if m.width == 0 || m.height == 0 {
 		return "Loading..."
 	}
@@ -1566,6 +1579,10 @@ func (m model) View() string {
 		mainContent,
 		statusBar,
 	)
+
+	// Cache the rendered view and update timestamp
+	m.cachedView = content
+	m.lastRenderTime = now
 
 	return content
 }
@@ -2870,7 +2887,8 @@ func (m model) renderContentSearchView() string {
 }
 
 func main() {
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
+	m := initialModel()
+	p := tea.NewProgram(&m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		log.Fatal(err)
 	}
