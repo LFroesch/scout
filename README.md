@@ -4,23 +4,42 @@ A lightning-fast TUI file explorer and fuzzy finder for developers. Navigate, se
 
 ## Features
 
+### Core File Management
+- **📁 Full File Operations** - Delete, rename, create files/directories with confirmation dialogs
+- **✂️ Copy/Cut/Paste** - Clipboard operations for files and directories (c, x, P)
+- **☑️ Bulk Selection** - Select multiple files with space, operate on all at once
+- **🗑️ Safe Deletion** - Move to trash when possible, with confirmation dialogs
+- **📊 Smart Sorting** - Sort by name, size, date, or type (press S)
+- **📐 File Info Display** - Shows file sizes, selection checkboxes, and git status
+
+### Advanced Search
 - **⚡ Advanced Fuzzy Search** - Lightning-fast fuzzy matching with result highlighting
 - **🔄 Recursive Search** - Search across entire project tree (toggle with Ctrl+R in search mode)
+- **🔍 Content Search** - Search inside files with ripgrep integration (Ctrl+G)
+- **🎨 Search Highlighting** - Matched characters highlighted in search results
+
+### Git Integration
+- **🔀 Enhanced Git Status** - Shows modified files and current branch in your repository
+- **📝 Git Diff Preview** - Automatically shows git diff for modified files in preview pane
+- **➕ Git Staging** - Stage files with 'A' key
+- **➖ Git Unstaging** - Unstage files with 'U' key
+- **🔄 Real-time Updates** - Git status updates automatically
+
+### Navigation & UI
 - **👁️ Live Preview** - See file contents without opening, with scrollable preview
-- **🔀 Enhanced Git Integration** - Shows modified files and current branch in your repository
+- **🖼️ Dual Pane Mode** - Side-by-side file management (toggle with T)
 - **📁 Smart Navigation** - Keyboard-driven interface with vim-like controls
-- **🎯 Quick Actions** - Open, edit, copy path with single keystrokes
-- **⚙️ Configurable Editor** - Set your preferred editor in config file
-- **💻 VS Code Integration** - Open files/directories as VS Code workspaces with 'o' key
-- **📐 Responsive Design** - Automatically fits terminal size with scrollable windows
 - **🏷️ File Icons** - Visual file type indicators for quick recognition
 - **📌 Smart Bookmarks** - Save and manage frequently accessed directories with frecency ranking
 - **🎯 Frecency Tracking** - Bookmarks sorted by frequency and recency of visits
 - **🚀 Advanced Navigation** - Half-page (Ctrl+D/U) and full-page (Ctrl+F/B) scrolling
-- **🎨 Search Highlighting** - Matched characters highlighted in search results
 - **⚙️ Configurable Root** - Set navigation boundaries with configurable root directory
-- **🛡️ Safe Deletion** - Confirmation dialogs for destructive operations
+
+### Integration & Productivity
+- **💻 VS Code Integration** - Open files/directories as VS Code workspaces with 'o' key
+- **⚙️ Configurable Editor** - Set your preferred editor in config file
 - **📋 Cross-platform Clipboard** - Reliable copy-to-clipboard on all platforms
+- **📐 Responsive Design** - Automatically fits terminal size with scrollable windows
 
 ## Installation
 
@@ -63,10 +82,12 @@ scout /path/to/directory
 - **`enter/l/→`** - Open directory or file
 - **`esc/h/←`** - Go to parent directory (respects root path limit)
 - **`~`** - Go to home directory
+- **`tab`** - Switch between panes (dual pane mode only)
 
 ### Search & Filter
-- **`/`** - Enter fuzzy search mode
+- **`/`** - Enter fuzzy search mode (filename search)
 - **`ctrl+r`** - Toggle recursive search (in search mode)
+- **`ctrl+g`** - Content search (search inside files with ripgrep)
 - **`esc`** - Exit search mode
 - **Type** - Fuzzy filter files with intelligent matching and highlighting
 
@@ -74,6 +95,24 @@ scout /path/to/directory
 - **`e`** - Edit file in default editor
 - **`o`** - Open file/directory (files: default app, directories: VS Code workspace)
 - **`y`** - Copy file path to clipboard
+- **`D`** - Delete file/directory (with confirmation)
+- **`R`** - Rename file/directory
+- **`N`** - Create new file
+- **`M`** - Create new directory
+- **`c`** - Copy selected files to clipboard
+- **`x`** - Cut selected files to clipboard
+- **`P`** - Paste files from clipboard
+- **`space`** - Toggle selection (for bulk operations)
+
+### Git Operations
+- **`A`** - Stage file (git add)
+- **`U`** - Unstage file (git reset)
+- **Git diff automatically shown in preview for modified files**
+
+### Sorting & Display
+- **`S`** - Open sort menu (sort by name/size/date/type)
+- **`I`** - Toggle permissions display
+- **`T`** - Toggle dual pane mode
 
 ### Bookmarks
 - **`b`** - Open bookmarks view
@@ -89,8 +128,7 @@ scout /path/to/directory
 - **`H`** - Toggle hidden files
 - **`p`** - Toggle preview pane
 - **`r`** - Refresh current directory
-- **`]`** - Scroll preview down
-- **`[`** - Scroll preview up
+- **`w/s`** - Scroll preview up/down (also works with alt+up/down)
 
 ### General
 - **`q/ctrl+c`** - Quit Scout
@@ -227,13 +265,78 @@ Scout is designed to be fast:
 6. Navigate and open any file instantly
 ```
 
-### Browse and Preview
+### Content Search (Search Inside Files)
 ```
-1. Navigate with `j/k` or `ctrl+d/u` for fast scrolling
-2. Preview shows on the right
-3. Use `[`/`]` to scroll preview
-4. Press `p` to toggle preview
-5. Press `e` to edit selected file
+1. Launch Scout in your project root
+2. Press `ctrl+g` for content search
+3. Type your search query (e.g., "func main")
+4. Press `enter` to search with ripgrep
+5. Navigate results with `j/k`
+6. Press `o` to open file at the matching line
+7. Press `esc` to close search
+```
+
+### File Management Operations
+```
+# Delete files
+1. Navigate to file with `j/k`
+2. Press `D` to delete
+3. Confirm with `y`
+
+# Rename files
+1. Navigate to file
+2. Press `R` to rename
+3. Edit the name and press `enter`
+
+# Copy/Paste workflow
+1. Navigate to files you want to copy
+2. Press `space` to select multiple files (or just one)
+3. Press `c` to copy (or `x` to cut)
+4. Navigate to destination directory
+5. Press `P` to paste
+
+# Create new files/directories
+1. Press `N` to create a new file
+2. Press `M` to create a new directory
+3. Type the name and press `enter`
+```
+
+### Bulk Operations
+```
+1. Navigate through files with `j/k`
+2. Press `space` to select files (✓ appears)
+3. Select multiple files
+4. Press `c` to copy all selected files
+5. Navigate to destination
+6. Press `P` to paste all at once
+```
+
+### Git Workflow
+```
+1. Navigate to a modified file (marked with [M])
+2. Preview pane automatically shows git diff
+3. Press `A` to stage the file
+4. Press `U` to unstage if needed
+5. Git status updates in real-time
+```
+
+### Dual Pane Mode
+```
+1. Press `T` to toggle dual pane mode
+2. Two file lists appear side by side
+3. Press `tab` to switch between panes
+4. Useful for comparing directories or copying files
+```
+
+### Sorting Files
+```
+1. Press `S` to open sort menu
+2. Use `j/k` to select sort mode:
+   - Name (default)
+   - Size (find largest files)
+   - Date (find newest files)
+   - Type (group by extension)
+3. Press `enter` to apply
 ```
 
 ### Smart Bookmark Workflow
@@ -262,9 +365,38 @@ Scout is designed to be fast:
 3. Path is now in clipboard (works on all platforms)
 ```
 
+## Requirements
+
+### Optional Dependencies
+- **ripgrep (rg)** - Required for content search feature (`ctrl+g`). Install with:
+  ```bash
+  # Ubuntu/Debian
+  sudo apt install ripgrep
+
+  # macOS
+  brew install ripgrep
+
+  # Arch Linux
+  sudo pacman -S ripgrep
+  ```
+
+- **gio or trash-put** - Optional, for moving files to trash instead of permanent deletion:
+  ```bash
+  # Ubuntu/Debian (gio is usually pre-installed with GNOME)
+  sudo apt install gvfs
+
+  # Or use trash-cli
+  sudo apt install trash-cli
+  ```
+
 ## Tips
 
 - **Root boundary**: Configure `root_path` to prevent accidentally navigating above your work directory
+- **Content search**: Install ripgrep (`rg`) for powerful content search - find text inside files instantly
+- **Safe deletion**: Install `gio` or `trash-put` to move deleted files to trash instead of permanent deletion
+- **Bulk operations**: Select multiple files with `space`, then use `c`/`x`/`P` for efficient file management
+- **Git integration**: Git diff automatically shows in preview for modified files - no need to switch to terminal
+- **Dual pane mode**: Use `T` for dual pane mode when copying/moving files between directories
 - **Recursive search**: Use `ctrl+r` in search mode to search your entire project - perfect for finding files deep in the tree
 - **Fast navigation**: Use `ctrl+d`/`ctrl+u` for half-page jumps, `ctrl+f`/`ctrl+b` for full-page
 - **Frecency magic**: The more you use Scout, the smarter your bookmarks become - most-used directories rise to the top
@@ -273,5 +405,6 @@ Scout is designed to be fast:
 - **Bookmark workflow**: Bookmark project roots, then use `b` → `o` for instant VS Code access
 - **Custom editor**: Set your preferred editor in config with `"editor": "nvim"` (or vim, nano, etc.)
 - **Search highlighting**: Matched characters are highlighted in yellow - helps you understand why results matched
+- **Sorting**: Press `S` to sort by size (find largest files) or date (find newest files)
 - **Status bar**: Watch the status bar for file info, git branch, and keyboard shortcuts
 - **Git awareness**: Current branch shows in header - always know which branch you're working on
