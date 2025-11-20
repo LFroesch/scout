@@ -1730,85 +1730,94 @@ func (m model) renderFileList(width int) string {
 }
 
 func (m model) renderPreview(width int) string {
-	// Calculate available height more conservatively
-	// Header(1) + Status(1) + borders(2) + padding(2) + buffer(2) = 8
 	availableHeight := m.height - 9
 	if availableHeight < 3 {
-		availableHeight = 3 // minimum height
+		availableHeight = 3
 	}
 
-	previewStyle := lipgloss.NewStyle().
+	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Width(width-2).
-		Height(availableHeight+2).
-		Padding(0, 1)
+		Height(availableHeight+2)
 
 	if len(m.previewLines) == 0 {
 		emptyStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
-			Italic(true)
-		return previewStyle.Render(emptyStyle.Render("No preview available"))
+			Italic(true).
+			Padding(0, 1)
+		return borderStyle.Render(emptyStyle.Render("No preview available"))
 	}
 
-	// Calculate content area (subtract space for scroll indicators)
-	contentHeight := availableHeight - 2 // Reserve space for scroll indicators
-	if contentHeight < 1 {
-		contentHeight = 1
+	// Extract sticky header (first 2-4 lines that contain metadata)
+	headerLines := []string{}
+	contentStartIdx := 0
+	for i, line := range m.previewLines {
+		// Header ends at first empty line
+		if strings.TrimSpace(line) == "" {
+			contentStartIdx = i + 1
+			break
+		}
+		headerLines = append(headerLines, line)
+		if i >= 5 { // Max 6 lines for header
+			contentStartIdx = i + 1
+			break
+		}
 	}
+
+	// Render sticky header
+	headerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("99")).
+		Bold(true).
+		Width(width - 4).
+		Padding(0, 1)
+	header := headerStyle.Render(strings.Join(headerLines, "\n"))
+
+	// Calculate scrollable content area
+	headerLineCount := len(headerLines)
+	scrollableHeight := availableHeight - headerLineCount
+	if scrollableHeight < 3 {
+		scrollableHeight = 3
+	}
+
+	// Get scrollable content lines (skip header)
+	contentLines := m.previewLines[contentStartIdx:]
 
 	startLine := m.previewScroll
-	endLine := startLine + contentHeight
-
-	if endLine > len(m.previewLines) {
-		endLine = len(m.previewLines)
+	endLine := startLine + scrollableHeight
+	if endLine > len(contentLines) {
+		endLine = len(contentLines)
 	}
-
-	if startLine >= len(m.previewLines) {
+	if startLine >= len(contentLines) {
 		startLine = 0
-		endLine = contentHeight
-		if endLine > len(m.previewLines) {
-			endLine = len(m.previewLines)
+		endLine = scrollableHeight
+		if endLine > len(contentLines) {
+			endLine = len(contentLines)
 		}
 	}
 
-	// Get visible lines
-	var visibleLines []string
-	if startLine < len(m.previewLines) {
-		visibleLines = m.previewLines[startLine:endLine]
-	}
-
-	// Build content with exact line count to match file list height
+	// Build scrollable content
 	var content []string
-	lineCount := 0
-
-	// Add top scroll indicator if needed
 	if startLine > 0 {
 		content = append(content, "▲ w")
-		lineCount++
 	}
 
-	// Add visible lines
-	for _, line := range visibleLines {
-		if lineCount < availableHeight {
-			content = append(content, line)
-			lineCount++
-		}
+	if startLine < len(contentLines) {
+		content = append(content, contentLines[startLine:endLine]...)
 	}
 
-	// Add bottom scroll indicator if needed (and there's room)
-	if endLine < len(m.previewLines) && lineCount < availableHeight {
+	if endLine < len(contentLines) {
 		content = append(content, "▼ s")
-		lineCount++
 	}
 
-	// Pad with empty lines to match exact height
-	for lineCount < availableHeight {
-		content = append(content, "")
-		lineCount++
-	}
+	contentStyle := lipgloss.NewStyle().
+		Width(width - 4).
+		Padding(0, 1)
+	scrollContent := contentStyle.Render(strings.Join(content, "\n"))
 
-	return previewStyle.Render(strings.Join(content, "\n"))
+	// Combine header and scrollable content
+	combined := header + "\n" + scrollContent
+	return borderStyle.Render(combined)
 }
 
 func (m model) renderBookmarksView() string {
