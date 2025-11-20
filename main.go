@@ -1031,7 +1031,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "s", "alt+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
-					availableHeight := m.height - 8
+					availableHeight := m.height - 9
 					if availableHeight < 1 {
 						availableHeight = 3
 					}
@@ -1078,7 +1078,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "ctrl+d":
 				// Half-page down
-				pageSize := (m.height - 8) / 2
+				pageSize := (m.height - 9) / 2
 				if pageSize < 1 {
 					pageSize = 5
 				}
@@ -1093,7 +1093,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "ctrl+u":
 				// Half-page up
-				pageSize := (m.height - 8) / 2
+				pageSize := (m.height - 9) / 2
 				if pageSize < 1 {
 					pageSize = 5
 				}
@@ -1105,7 +1105,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "ctrl+f":
 				// Full-page down
-				pageSize := m.height - 8
+				pageSize := m.height - 9
 				if pageSize < 1 {
 					pageSize = 10
 				}
@@ -1120,7 +1120,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "ctrl+b":
 				// Full-page up
-				pageSize := m.height - 8
+				pageSize := m.height - 9
 				if pageSize < 1 {
 					pageSize = 10
 				}
@@ -1133,7 +1133,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "s", "alt+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
-					availableHeight := m.height - 8
+					availableHeight := m.height - 9
 					if availableHeight < 3 {
 						availableHeight = 3
 					}
@@ -1585,13 +1585,13 @@ func (m model) renderHeader() string {
 
 func (m model) renderFileList(width int) string {
 	// Use same height calculation as preview for consistency
-	availableHeight := m.height - 8
+	availableHeight := m.height - 9
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
 
 	listStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Width(width-2).
 		Height(availableHeight+2).
@@ -1599,8 +1599,18 @@ func (m model) renderFileList(width int) string {
 
 	var items []string
 
-	// Calculate visible range
-	visibleHeight := availableHeight
+	// Add sticky header with directory and item count
+	dirName := filepath.Base(m.currentDir)
+	if dirName == "" || dirName == "." {
+		dirName = m.currentDir
+	}
+	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
+	header := fmt.Sprintf("📁 %s  •  Items: %d", dirName, len(m.filteredFiles))
+	items = append(items, headerStyle.Render(header))
+	items = append(items, "") // Empty line for spacing
+
+	// Calculate visible range (reduced by 2 for header)
+	visibleHeight := availableHeight - 2
 	startIdx := m.scrollOffset
 	endIdx := startIdx + visibleHeight
 
@@ -1649,7 +1659,8 @@ func (m model) renderFileList(width int) string {
 		// Git status
 		gitStatus := ""
 		if m.gitModified[item.path] {
-			gitStatus = " [M]"
+			modifiedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+			gitStatus = " " + modifiedStyle.Render("[M]")
 		}
 
 		// Format item with highlighting if in search mode
@@ -1709,13 +1720,13 @@ func (m model) renderFileList(width int) string {
 func (m model) renderPreview(width int) string {
 	// Calculate available height more conservatively
 	// Header(1) + Status(1) + borders(2) + padding(2) + buffer(2) = 8
-	availableHeight := m.height - 8
+	availableHeight := m.height - 9
 	if availableHeight < 3 {
 		availableHeight = 3 // minimum height
 	}
 
 	previewStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Width(width-2).
 		Height(availableHeight+2).
@@ -1790,14 +1801,14 @@ func (m model) renderPreview(width int) string {
 
 func (m model) renderBookmarksView() string {
 	// Calculate available height
-	availableHeight := m.height - 8
+	availableHeight := m.height - 9
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
 
 	// Full width bookmarks panel
 	bookmarksStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(m.width - 2).
 		Height(availableHeight + 2).
@@ -1885,7 +1896,7 @@ func (m model) renderConfirmDeleteView() string {
 	bookmarkName := filepath.Base(bookmark)
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("196")). // Red border
 		Width(dialogWidth).
 		Height(dialogHeight).
@@ -1910,7 +1921,7 @@ func (m model) renderConfirmDeleteView() string {
 	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
 
 	// Center the dialog on screen
-	dialogBox := lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+	dialogBox := lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
 
 	return dialogBox
 }
@@ -1959,8 +1970,11 @@ func (m model) renderStatusBar() string {
 			keyStyle.Render("esc:"))
 		helpPlainText = "↑↓: navigate • enter: go • o: vscode • d: delete • esc: exit"
 	} else {
+		// Two-row footer with right-aligned hints
 		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-		help = fmt.Sprintf("%s nav • %s search • %s open • %s edit • %s vscode • %s rename • %s delete • %s new • %s copy/cut • %s paste • %s select • %s preview • %s bookmarks • %s sort • %s help",
+
+		// Row 1 hints
+		row1Hints := fmt.Sprintf("%s nav • %s search • %s open • %s edit • %s vscode • %s rename • %s delete • %s new",
 			keyStyle.Render("↑↓:"),
 			keyStyle.Render("/:"),
 			keyStyle.Render("enter:"),
@@ -1968,7 +1982,11 @@ func (m model) renderStatusBar() string {
 			keyStyle.Render("o:"),
 			keyStyle.Render("R:"),
 			keyStyle.Render("D:"),
-			keyStyle.Render("N/M:"),
+			keyStyle.Render("N/M:"))
+		row1HintsPlain := "↑↓: nav • /: search • enter: open • e: edit • o: vscode • R: rename • D: delete • N/M: new"
+
+		// Row 2 hints
+		row2Hints := fmt.Sprintf("%s copy/cut • %s paste • %s select • %s preview • %s bookmarks • %s sort • %s help",
 			keyStyle.Render("c/x:"),
 			keyStyle.Render("P:"),
 			keyStyle.Render("space:"),
@@ -1976,43 +1994,44 @@ func (m model) renderStatusBar() string {
 			keyStyle.Render("b:"),
 			keyStyle.Render("S:"),
 			keyStyle.Render("?:"))
-		helpPlainText = "↑↓: nav • /: search • enter: open • e: edit • o: vscode • R: rename • D: delete • N/M: new • c/x: copy/cut • P: paste • space: select • p: preview • b: bookmarks • S: sort • ?: help"
+		row2HintsPlain := "c/x: copy/cut • P: paste • space: select • p: preview • b: bookmarks • S: sort • ?: help"
+
+		// Build row 1: leftInfo + status + right-aligned hints
+		leftContent := leftInfo
+		if center != "" {
+			leftContent += "  " + center
+		}
+		spacingRow1 := m.width - len(leftContent) - len(row1HintsPlain) - 2
+		if spacingRow1 < 2 {
+			spacingRow1 = 2
+		}
+		row1 := leftContent + strings.Repeat(" ", spacingRow1) + row1Hints
+
+		// Build row 2: only right-aligned hints
+		spacingRow2 := m.width - len(row2HintsPlain) - 2
+		if spacingRow2 < 0 {
+			spacingRow2 = 0
+		}
+		row2 := strings.Repeat(" ", spacingRow2) + row2Hints
+
+		combined := row1 + "\n" + row2
+		return statusStyle.Render(combined)
 	}
 
-	// Build status bar with consistent background
-	// Available width minus padding
-	availableWidth := m.width - 2
-
-	// Calculate plain text widths
-	leftPlainWidth := len(leftInfo)
-	rightPlainWidth := len(helpPlainText)
-	centerPlainWidth := len(center)
-
-	// Calculate remaining space for padding between sections
-	usedWidth := leftPlainWidth + rightPlainWidth + centerPlainWidth
-	remainingSpace := availableWidth - usedWidth
-	if remainingSpace < 0 {
-		remainingSpace = 0
+	// Single row for bookmark mode
+	padding := m.width - len(leftInfo) - len(helpPlainText) - 2
+	if padding < 2 {
+		padding = 2
 	}
-
-	// Split remaining space: small gap after left, rest before right
-	leftPadding := 2
-	if remainingSpace < leftPadding {
-		leftPadding = remainingSpace
-	}
-	rightPadding := remainingSpace - leftPadding
-
-	// Build the complete line with proper spacing
-	var statusLine string
 	if center != "" {
-		// If there's a status message, show it in the middle area
-		statusLine = leftInfo + strings.Repeat(" ", leftPadding) + center + strings.Repeat(" ", rightPadding) + help
-	} else {
-		// No status message, just push help to the right
-		statusLine = leftInfo + strings.Repeat(" ", remainingSpace) + help
+		leftInfo += "  " + center
+		padding = m.width - len(leftInfo) - len(helpPlainText) - 2
+		if padding < 2 {
+			padding = 2
+		}
 	}
-
-	return statusStyle.Render(statusLine)
+	combined := leftInfo + strings.Repeat(" ", padding) + help
+	return statusStyle.Render(combined)
 }
 
 // Helper functions
@@ -2455,7 +2474,7 @@ func (m model) renderConfirmFileDeleteView() string {
 	fileName := file.name
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("196")).
 		Width(dialogWidth).
 		Height(dialogHeight).
@@ -2481,7 +2500,7 @@ func (m model) renderConfirmFileDeleteView() string {
 	dialogContent = append(dialogContent, confirmText)
 
 	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
 }
 
 func (m model) renderRenameDialog() string {
@@ -2489,7 +2508,7 @@ func (m model) renderRenameDialog() string {
 	dialogHeight := 6
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(dialogWidth).
 		Height(dialogHeight).
@@ -2503,7 +2522,7 @@ func (m model) renderRenameDialog() string {
 	dialogContent = append(dialogContent, "Press Enter to confirm, Esc to cancel")
 
 	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
 }
 
 func (m model) renderCreateFileDialog() string {
@@ -2511,7 +2530,7 @@ func (m model) renderCreateFileDialog() string {
 	dialogHeight := 6
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(dialogWidth).
 		Height(dialogHeight).
@@ -2525,7 +2544,7 @@ func (m model) renderCreateFileDialog() string {
 	dialogContent = append(dialogContent, "Press Enter to confirm, Esc to cancel")
 
 	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
 }
 
 func (m model) renderCreateDirDialog() string {
@@ -2533,7 +2552,7 @@ func (m model) renderCreateDirDialog() string {
 	dialogHeight := 6
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(dialogWidth).
 		Height(dialogHeight).
@@ -2547,7 +2566,7 @@ func (m model) renderCreateDirDialog() string {
 	dialogContent = append(dialogContent, "Press Enter to confirm, Esc to cancel")
 
 	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, dialog)
+	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
 }
 
 func (m model) renderSortMenu() string {
@@ -2555,7 +2574,7 @@ func (m model) renderSortMenu() string {
 	dialogHeight := 10
 
 	menuStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(dialogWidth).
 		Height(dialogHeight).
@@ -2582,17 +2601,17 @@ func (m model) renderSortMenu() string {
 	menuItems = append(menuItems, "Enter: Select • Esc: Cancel")
 
 	menu := menuStyle.Render(strings.Join(menuItems, "\n"))
-	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, menu)
+	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, menu)
 }
 
 func (m model) renderHelpView() string {
-	availableHeight := m.height - 8
+	availableHeight := m.height - 9
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
 
 	helpStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(m.width - 4).
 		Height(availableHeight + 2).
@@ -2668,17 +2687,17 @@ func (m model) renderHelpView() string {
 	helpContent = append(helpContent, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Press esc, q, or ? to close this help screen"))
 
 	help := helpStyle.Render(strings.Join(helpContent, "\n"))
-	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, help)
+	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, help)
 }
 
 func (m model) renderContentSearchView() string {
-	availableHeight := m.height - 8
+	availableHeight := m.height - 9
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
 
 	searchStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("99")).
 		Width(m.width - 2).
 		Height(availableHeight + 2).
