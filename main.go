@@ -1199,7 +1199,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searchInput.Focus()
 				return m, textinput.Blink
 
-			case "H":
+			case ".":
 				m.showHidden = !m.showHidden
 				m.loadFiles()
 				if m.showHidden {
@@ -1600,7 +1600,12 @@ func (m model) renderFileList(width int) string {
 		Bold(true).
 		Width(width - 4).
 		Padding(0, 1)
-	header := headerStyle.Render(fmt.Sprintf("📁 %s  •  Items: %d", dirName, len(m.filteredFiles)))
+
+	hiddenIndicator := ""
+	if m.showHidden {
+		hiddenIndicator = "  •  👁️ Show hidden"
+	}
+	header := headerStyle.Render(fmt.Sprintf("📁 %s  •  Items: %d%s", dirName, len(m.filteredFiles), hiddenIndicator))
 
 	// Scrollable file list (reduced height for header)
 	listHeight := availableHeight - 1 // Reserve 1 line for header
