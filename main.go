@@ -1979,25 +1979,40 @@ func (m model) renderStatusBar() string {
 		helpPlainText = "↑↓: nav • /: search • enter: open • e: edit • o: vscode • R: rename • D: delete • N/M: new • c/x: copy/cut • P: paste • space: select • p: preview • b: bookmarks • S: sort • ?: help"
 	}
 
-	// Combine sections - use fixed widths to avoid overlap
-	leftWidth := len(leftInfo)
-	rightWidth := len(helpPlainText)
-	centerWidth := m.width - leftWidth - rightWidth - 6 // account for padding
+	// Build status bar with consistent background
+	// Available width minus padding
+	availableWidth := m.width - 2
 
-	if centerWidth < 0 {
-		centerWidth = 0
+	// Calculate plain text widths
+	leftPlainWidth := len(leftInfo)
+	rightPlainWidth := len(helpPlainText)
+	centerPlainWidth := len(center)
+
+	// Calculate remaining space for padding between sections
+	usedWidth := leftPlainWidth + rightPlainWidth + centerPlainWidth
+	remainingSpace := availableWidth - usedWidth
+	if remainingSpace < 0 {
+		remainingSpace = 0
 	}
 
-	// Create sections without background first
-	leftSection := lipgloss.NewStyle().Width(leftWidth + 2).Render(leftInfo)
-	centerSection := lipgloss.NewStyle().Width(centerWidth).Align(lipgloss.Center).Render(center)
-	rightSection := lipgloss.NewStyle().Width(rightWidth + 2).Align(lipgloss.Right).Render(help)
+	// Split remaining space: small gap after left, rest before right
+	leftPadding := 2
+	if remainingSpace < leftPadding {
+		leftPadding = remainingSpace
+	}
+	rightPadding := remainingSpace - leftPadding
 
-	// Join them together
-	combined := lipgloss.JoinHorizontal(lipgloss.Top, leftSection, centerSection, rightSection)
+	// Build the complete line with proper spacing
+	var statusLine string
+	if center != "" {
+		// If there's a status message, show it in the middle area
+		statusLine = leftInfo + strings.Repeat(" ", leftPadding) + center + strings.Repeat(" ", rightPadding) + help
+	} else {
+		// No status message, just push help to the right
+		statusLine = leftInfo + strings.Repeat(" ", remainingSpace) + help
+	}
 
-	// Apply full-width background to entire status bar
-	return statusStyle.Render(combined)
+	return statusStyle.Render(statusLine)
 }
 
 // Helper functions
