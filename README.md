@@ -20,10 +20,7 @@ A lightning-fast TUI file explorer and fuzzy finder for developers. Navigate, se
 
 ### Git Integration
 - **🔀 Enhanced Git Status** - Shows modified files and current branch in your repository
-- **📝 Git Diff Preview** - Automatically shows git diff for modified files in preview pane
-- **➕ Git Staging** - Stage files with 'A' key
-- **➖ Git Unstaging** - Unstage files with 'U' key
-- **🔄 Real-time Updates** - Git status updates automatically
+- **📝 Git Awareness** - Modified files marked with [M] indicator
 
 ### Navigation & UI
 - **👁️ Live Preview** - See file contents without opening, with scrollable preview
@@ -103,11 +100,6 @@ scout /path/to/directory
 - **`x`** - Cut selected files to clipboard
 - **`P`** - Paste files from clipboard
 - **`space`** - Toggle selection (for bulk operations)
-
-### Git Operations
-- **`A`** - Stage file (git add)
-- **`U`** - Unstage file (git reset)
-- **Git diff automatically shown in preview for modified files**
 
 ### Sorting & Display
 - **`S`** - Open sort menu (sort by name/size/date/type)
@@ -311,15 +303,6 @@ Scout is designed to be fast:
 6. Press `P` to paste all at once
 ```
 
-### Git Workflow
-```
-1. Navigate to a modified file (marked with [M])
-2. Preview pane automatically shows git diff
-3. Press `A` to stage the file
-4. Press `U` to unstage if needed
-5. Git status updates in real-time
-```
-
 ### Dual Pane Mode
 ```
 1. Press `T` to toggle dual pane mode
@@ -395,7 +378,7 @@ Scout is designed to be fast:
 - **Content search**: Install ripgrep (`rg`) for powerful content search - find text inside files instantly
 - **Safe deletion**: Install `gio` or `trash-put` to move deleted files to trash instead of permanent deletion
 - **Bulk operations**: Select multiple files with `space`, then use `c`/`x`/`P` for efficient file management
-- **Git integration**: Git diff automatically shows in preview for modified files - no need to switch to terminal
+- **Git awareness**: Modified files show [M] marker and current branch displays in header
 - **Dual pane mode**: Use `T` for dual pane mode when copying/moving files between directories
 - **Recursive search**: Use `ctrl+r` in search mode to search your entire project - perfect for finding files deep in the tree
 - **Fast navigation**: Use `ctrl+d`/`ctrl+u` for half-page jumps, `ctrl+f`/`ctrl+b` for full-page

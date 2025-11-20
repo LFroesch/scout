@@ -502,40 +502,6 @@ func (m *model) searchFileContent(query string) error {
 	return nil
 }
 
-func (m *model) gitStageFile(path string) error {
-	cmd := exec.Command("git", "add", path)
-	cmd.Dir = m.currentDir
-	return cmd.Run()
-}
-
-func (m *model) gitUnstageFile(path string) error {
-	cmd := exec.Command("git", "reset", "HEAD", path)
-	cmd.Dir = m.currentDir
-	return cmd.Run()
-}
-
-func (m *model) gitDiff(path string) string {
-	// Get diff for file
-	cmd := exec.Command("git", "diff", "HEAD", path)
-	cmd.Dir = m.currentDir
-	output, err := cmd.Output()
-	if err != nil {
-		// Try unstaged diff
-		cmd = exec.Command("git", "diff", path)
-		cmd.Dir = m.currentDir
-		output, err = cmd.Output()
-		if err != nil {
-			return fmt.Sprintf("Error getting git diff: %v", err)
-		}
-	}
-
-	if len(output) == 0 {
-		return "No changes"
-	}
-
-	return string(output)
-}
-
 func (m *model) updateFilter() {
 	query := m.searchInput.Value()
 	if query == "" {
@@ -736,13 +702,8 @@ func (m *model) previewFile(path string) string {
 	preview.WriteString(fmt.Sprintf("Size: %s\n", formatFileSize(info.Size())))
 	preview.WriteString(fmt.Sprintf("Modified: %s\n", info.ModTime().Format("Jan 2, 2006 15:04")))
 
-	// Show git diff for modified files
 	if m.gitModified[path] {
 		preview.WriteString("Git: Modified\n")
-		preview.WriteString("\n--- Git Diff ---\n")
-		diff := m.gitDiff(path)
-		preview.WriteString(diff)
-		return preview.String()
 	}
 
 	preview.WriteString("\n")
@@ -1462,43 +1423,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textInput.Placeholder = "Search file contents..."
 				m.textInput.Focus()
 				return m, textinput.Blink
-
-			// Git operations
-			case "A":
-				// Git stage file
-				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
-					selected := m.filteredFiles[m.cursor]
-					if selected.name != ".." && !selected.isDir {
-						if err := m.gitStageFile(selected.path); err != nil {
-							m.statusMsg = fmt.Sprintf("Error staging: %v", err)
-							m.statusExpiry = time.Now().Add(3 * time.Second)
-						} else {
-							m.statusMsg = fmt.Sprintf("Staged: %s", selected.name)
-							m.statusExpiry = time.Now().Add(2 * time.Second)
-							// Refresh git status
-							m.gitModified = getGitModifiedFiles(m.currentDir)
-							m.updatePreview()
-						}
-					}
-				}
-
-			case "U":
-				// Git unstage file
-				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
-					selected := m.filteredFiles[m.cursor]
-					if selected.name != ".." && !selected.isDir {
-						if err := m.gitUnstageFile(selected.path); err != nil {
-							m.statusMsg = fmt.Sprintf("Error unstaging: %v", err)
-							m.statusExpiry = time.Now().Add(3 * time.Second)
-						} else {
-							m.statusMsg = fmt.Sprintf("Unstaged: %s", selected.name)
-							m.statusExpiry = time.Now().Add(2 * time.Second)
-							// Refresh git status
-							m.gitModified = getGitModifiedFiles(m.currentDir)
-							m.updatePreview()
-						}
-					}
-				}
 			}
 		}
 	}
