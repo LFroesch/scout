@@ -681,16 +681,26 @@ func (m *model) wrapTextToLines(text string, width int) []string {
 	lines := strings.Split(text, "\n")
 
 	for _, line := range lines {
-		if len(line) <= width {
+		// Use lipgloss.Width for proper unicode and ANSI handling
+		if lipgloss.Width(line) <= width {
 			wrappedLines = append(wrappedLines, line)
 		} else {
-			// Wrap long lines
-			for len(line) > width {
-				wrappedLines = append(wrappedLines, line[:width])
-				line = line[width:]
+			// Wrap long lines character by character to handle multi-byte chars
+			runes := []rune(line)
+			currentLine := ""
+			for _, r := range runes {
+				testLine := currentLine + string(r)
+				if lipgloss.Width(testLine) > width {
+					if currentLine != "" {
+						wrappedLines = append(wrappedLines, currentLine)
+					}
+					currentLine = string(r)
+				} else {
+					currentLine = testLine
+				}
 			}
-			if len(line) > 0 {
-				wrappedLines = append(wrappedLines, line)
+			if currentLine != "" {
+				wrappedLines = append(wrappedLines, currentLine)
 			}
 		}
 	}
@@ -742,7 +752,7 @@ func (m *model) previewFile(path string) string {
 	// File info header
 	icon := getFileIcon(filepath.Base(path))
 	preview.WriteString(fmt.Sprintf("%s %s\n", icon, filepath.Base(path)))
-	preview.WriteString(fmt.Sprintf("Size: %s\n", formatFileSize(info.Size())))
+	preview.WriteString(fmt.Sprintf("Size: %s\n", formatFileSizeColored(info.Size())))
 	preview.WriteString(fmt.Sprintf("Modified: %s\n", info.ModTime().Format("Jan 2, 2006 15:04")))
 
 	if m.gitModified[path] {
@@ -1762,7 +1772,7 @@ func (m model) renderFileList(width int) string {
 		// Add file size for files
 		sizeStr := ""
 		if !item.isDir && item.name != ".." {
-			sizeStr = " " + formatFileSize(item.size)
+			sizeStr = " " + formatFileSizeColored(item.size)
 		}
 
 		// Truncate name if needed
@@ -1770,8 +1780,18 @@ func (m model) renderFileList(width int) string {
 		if maxNameLen < 10 {
 			maxNameLen = 10
 		}
-		if len(name) > maxNameLen {
-			displayName = displayName[:min(len(displayName), maxNameLen-3)] + "..."
+		// Use lipgloss.Width for proper unicode and ANSI handling
+		if lipgloss.Width(name) > maxNameLen {
+			// Truncate character by character to handle multi-byte chars
+			runes := []rune(name)
+			truncated := ""
+			for _, r := range runes {
+				if lipgloss.Width(truncated+string(r)+"...") > maxNameLen {
+					break
+				}
+				truncated += string(r)
+			}
+			displayName = truncated + "..."
 		}
 
 		line := fmt.Sprintf("%s%s %s%s%s", checkbox, icon, displayName, sizeStr, gitStatus)
@@ -2056,7 +2076,7 @@ func (m model) renderStatusBar() string {
 		if current.isDir {
 			leftInfo = fmt.Sprintf("📁 %s", current.name)
 		} else {
-			leftInfo = fmt.Sprintf("📄 %s (%s)", current.name, formatFileSize(current.size))
+			leftInfo = fmt.Sprintf("📄 %s (%s)", current.name, formatFileSizeColored(current.size))
 		}
 	}
 
@@ -2358,6 +2378,35 @@ func formatFileSize(size int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
+}
+
+// formatFileSizeColored returns a color-styled file size string based on size ranges
+func formatFileSizeColored(size int64) string {
+	sizeStr := formatFileSize(size)
+
+	const (
+		KB  = 1024
+		MB  = 1024 * KB
+		MB100 = 100 * MB
+	)
+
+	var style lipgloss.Style
+	switch {
+	case size < KB:
+		// < 1 KB: dim gray for tiny files
+		style = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	case size < MB:
+		// 1 KB - 1 MB: normal color for typical files
+		style = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	case size < MB100:
+		// 1 MB - 100 MB: yellow/orange for large files
+		style = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	default:
+		// > 100 MB: red bold for very large files
+		style = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	}
+
+	return style.Render(sizeStr)
 }
 
 func getGitModifiedFiles(dir string) map[string]bool {
