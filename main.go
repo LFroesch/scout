@@ -19,6 +19,8 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
+type previewUpdateMsg struct{}
+
 type mode int
 
 const (
@@ -115,6 +117,8 @@ type model struct {
 	permissions         bool          // Show permissions
 	contentSearchResults []contentSearchResult // Ripgrep search results
 	contentSearchCursor int           // Cursor in content search results
+	previewPending      bool          // Preview update pending
+	previewCursor       int           // Cursor position preview is showing
 }
 
 type contentSearchResult struct {
@@ -607,11 +611,19 @@ func (m *model) recursiveSearchFiles(query string) {
 	}
 }
 
+func previewUpdateAfterDelay() tea.Cmd {
+	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
+		return previewUpdateMsg{}
+	})
+}
+
 func (m *model) updatePreview() {
 	if !m.showPreview || len(m.filteredFiles) == 0 || m.cursor >= len(m.filteredFiles) {
 		m.previewContent = ""
 		m.previewLines = []string{}
 		m.previewScroll = 0
+		m.previewCursor = m.cursor
+		m.previewPending = false
 		return
 	}
 
@@ -627,6 +639,8 @@ func (m *model) updatePreview() {
 
 	m.previewLines = m.wrapTextToLines(m.previewContent, previewWidth)
 	m.previewScroll = 0
+	m.previewCursor = m.cursor
+	m.previewPending = false
 }
 
 // wrapTextToLines splits text into lines and wraps long lines to fit width
@@ -785,6 +799,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Update preview with new width (text needs to reflow)
 		m.updatePreview()
+		return m, nil
+
+	case previewUpdateMsg:
+		// Delayed preview update - only execute if cursor hasn't moved since
+		if m.previewPending && m.cursor != m.previewCursor {
+			m.updatePreview()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -1102,17 +1123,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "j", "down":
 				if m.cursor < len(m.filteredFiles)-1 {
 					m.cursor++
-					m.updatePreview()
+					m.previewPending = true
+					return m, previewUpdateAfterDelay()
 				}
 
 			case "k", "up":
 				if m.cursor > 0 {
 					m.cursor--
-					m.updatePreview()
+					m.previewPending = true
+					return m, previewUpdateAfterDelay()
 				}
 
 			case "ctrl+d":
-				// Half-page down (skip preview update for performance)
+				// Half-page down (delayed preview for performance)
 				pageSize := (m.height - 9) / 2
 				if pageSize < 1 {
 					pageSize = 5
@@ -1124,9 +1147,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor < 0 {
 					m.cursor = 0
 				}
+				m.previewPending = true
+				return m, previewUpdateAfterDelay()
 
 			case "ctrl+u":
-				// Half-page up (skip preview update for performance)
+				// Half-page up (delayed preview for performance)
 				pageSize := (m.height - 9) / 2
 				if pageSize < 1 {
 					pageSize = 5
@@ -1135,9 +1160,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor < 0 {
 					m.cursor = 0
 				}
+				m.previewPending = true
+				return m, previewUpdateAfterDelay()
 
 			case "ctrl+f":
-				// Full-page down (skip preview update for performance)
+				// Full-page down (delayed preview for performance)
 				pageSize := m.height - 9
 				if pageSize < 1 {
 					pageSize = 10
@@ -1149,9 +1176,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor < 0 {
 					m.cursor = 0
 				}
+				m.previewPending = true
+				return m, previewUpdateAfterDelay()
 
 			case "ctrl+b":
-				// Full-page up (skip preview update for performance)
+				// Full-page up (delayed preview for performance)
 				pageSize := m.height - 9
 				if pageSize < 1 {
 					pageSize = 10
@@ -1160,6 +1189,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor < 0 {
 					m.cursor = 0
 				}
+				m.previewPending = true
+				return m, previewUpdateAfterDelay()
 
 			case "s", "alt+down":
 				// Scroll preview down
@@ -1185,12 +1216,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "g":
 				m.cursor = 0
-				m.updatePreview()
+				m.previewPending = true
+				return m, previewUpdateAfterDelay()
 
 			case "G":
 				if len(m.filteredFiles) > 0 {
 					m.cursor = len(m.filteredFiles) - 1
-					m.updatePreview()
+					m.previewPending = true
+					return m, previewUpdateAfterDelay()
 				}
 
 			case "enter", "l", "right":
