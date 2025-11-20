@@ -750,6 +750,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+		// Recalculate scroll positions for new height
+		if len(m.filteredFiles) > 0 {
+			availableHeight := m.height - 9
+			if availableHeight < 3 {
+				availableHeight = 3
+			}
+			visibleHeight := availableHeight - 1
+
+			// Ensure cursor is still in valid range
+			if m.cursor >= len(m.filteredFiles) {
+				m.cursor = len(m.filteredFiles) - 1
+			}
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+
+			// Adjust scroll offset to keep cursor visible
+			if m.scrollOffset > m.cursor {
+				m.scrollOffset = m.cursor
+			}
+			maxScroll := len(m.filteredFiles) - visibleHeight
+			if maxScroll < 0 {
+				maxScroll = 0
+			}
+			if m.scrollOffset > maxScroll {
+				m.scrollOffset = maxScroll
+			}
+			if m.cursor >= m.scrollOffset + visibleHeight {
+				m.scrollOffset = m.cursor - visibleHeight + 1
+			}
+		}
+
+		// Update preview with new width (text needs to reflow)
+		m.updatePreview()
 		return m, nil
 
 	case tea.KeyMsg:
