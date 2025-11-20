@@ -35,6 +35,7 @@ const (
 	modeConfirmFileDelete
 	modeGitCommit
 	modeContentSearch
+	modeHelp
 )
 
 type sortMode int
@@ -949,6 +950,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case modeHelp:
+			switch msg.String() {
+			case "esc", "q", "?":
+				m.mode = modeNormal
+				return m, nil
+			}
+			return m, nil
+
 		case modeContentSearch:
 			switch msg.String() {
 			case "esc":
@@ -1406,6 +1415,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.activePane = 1 - m.activePane
 				}
 
+			case "?":
+				// Show help screen
+				m.mode = modeHelp
+
 			case "I":
 				// Toggle permissions display
 				m.permissions = !m.permissions
@@ -1459,6 +1472,8 @@ func (m model) View() string {
 		mainContent = m.renderSortMenu()
 	case modeContentSearch:
 		mainContent = m.renderContentSearchView()
+	case modeHelp:
+		mainContent = m.renderHelpView()
 	default:
 		if m.dualPane {
 			// Dual pane mode
@@ -1945,16 +1960,17 @@ func (m model) renderStatusBar() string {
 		helpPlainText = "↑↓: navigate • enter: go • o: vscode • d: delete • esc: exit"
 	} else {
 		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-		help = fmt.Sprintf("%s navigate • %s search • %s open • %s vscode • %s bookmarks • %s add bookmark • %s back • %s preview",
-			keyStyle.Render("↑↓ws:"),
+		help = fmt.Sprintf("%s nav • %s search • %s open • %s rename • %s delete • %s new file/dir • %s copy • %s paste • %s help",
+			keyStyle.Render("↑↓:"),
 			keyStyle.Render("/:"),
 			keyStyle.Render("enter:"),
-			keyStyle.Render("o:"),
-			keyStyle.Render("b:"),
-			keyStyle.Render("B:"),
-			keyStyle.Render("esc:"),
-			keyStyle.Render("p:"))
-		helpPlainText = "↑↓ws: navigate • /: search • enter: open • o: vscode • b: bookmarks • B: add bookmark • esc: back • p: preview"
+			keyStyle.Render("R:"),
+			keyStyle.Render("D:"),
+			keyStyle.Render("N/M:"),
+			keyStyle.Render("c/x:"),
+			keyStyle.Render("P:"),
+			keyStyle.Render("?:"))
+		helpPlainText = "↑↓: nav • /: search • enter: open • R: rename • D: delete • N/M: new file/dir • c/x: copy • P: paste • ?: help"
 	}
 
 	// Combine sections - use fixed widths to avoid overlap
@@ -2546,6 +2562,92 @@ func (m model) renderSortMenu() string {
 
 	menu := menuStyle.Render(strings.Join(menuItems, "\n"))
 	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, menu)
+}
+
+func (m model) renderHelpView() string {
+	availableHeight := m.height - 8
+	if availableHeight < 3 {
+		availableHeight = 3
+	}
+
+	helpStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("99")).
+		Width(m.width - 4).
+		Height(availableHeight + 2).
+		Padding(1)
+
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
+	sectionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+
+	var helpContent []string
+	helpContent = append(helpContent, sectionStyle.Render("🔍 Scout Keyboard Shortcuts"))
+	helpContent = append(helpContent, "")
+
+	// Navigation section
+	helpContent = append(helpContent, sectionStyle.Render("Navigation:"))
+	helpContent = append(helpContent, fmt.Sprintf("  %s          Move up/down", keyStyle.Render("↑/↓ or j/k")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s         Scroll preview pane up/down", keyStyle.Render("w/s")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s          Jump to top/bottom", keyStyle.Render("g/G")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s       Half-page up/down", keyStyle.Render("ctrl+u/d")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s       Full-page up/down", keyStyle.Render("ctrl+b/f")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s         Go to home directory", keyStyle.Render("~")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s         Go back", keyStyle.Render("esc")))
+	helpContent = append(helpContent, "")
+
+	// File Operations section
+	helpContent = append(helpContent, sectionStyle.Render("File Operations:"))
+	helpContent = append(helpContent, fmt.Sprintf("  %s           Open file/directory", keyStyle.Render("enter")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Open in VS Code", keyStyle.Render("o")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Edit file", keyStyle.Render("e")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Rename file/directory", keyStyle.Render("R")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Delete file/directory", keyStyle.Render("D")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Create new file", keyStyle.Render("N")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Create new directory", keyStyle.Render("M")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Refresh current view", keyStyle.Render("r")))
+	helpContent = append(helpContent, "")
+
+	// Clipboard Operations section
+	helpContent = append(helpContent, sectionStyle.Render("Clipboard:"))
+	helpContent = append(helpContent, fmt.Sprintf("  %s           Copy selected files", keyStyle.Render("c")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s           Cut selected files", keyStyle.Render("x")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s           Paste files", keyStyle.Render("P")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s           Copy path to clipboard", keyStyle.Render("y")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s       Toggle selection (for bulk ops)", keyStyle.Render("space")))
+	helpContent = append(helpContent, "")
+
+	// Search & Filter section
+	helpContent = append(helpContent, sectionStyle.Render("Search & Filter:"))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Search by filename", keyStyle.Render("/")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s       Search file content (ripgrep)", keyStyle.Render("ctrl+g")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s       Toggle recursive search", keyStyle.Render("ctrl+r")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Open sort menu", keyStyle.Render("S")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Toggle hidden files", keyStyle.Render(".")))
+	helpContent = append(helpContent, "")
+
+	// View Options section
+	helpContent = append(helpContent, sectionStyle.Render("View Options:"))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Toggle preview pane", keyStyle.Render("p")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Toggle dual pane mode", keyStyle.Render("T")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s           Switch active pane", keyStyle.Render("tab")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Toggle permissions display", keyStyle.Render("I")))
+	helpContent = append(helpContent, "")
+
+	// Bookmarks section
+	helpContent = append(helpContent, sectionStyle.Render("Bookmarks:"))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             View bookmarks", keyStyle.Render("b")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Add bookmark", keyStyle.Render("B")))
+	helpContent = append(helpContent, "")
+
+	// Other section
+	helpContent = append(helpContent, sectionStyle.Render("Other:"))
+	helpContent = append(helpContent, fmt.Sprintf("  %s             Show this help screen", keyStyle.Render("?")))
+	helpContent = append(helpContent, fmt.Sprintf("  %s       Quit Scout", keyStyle.Render("q / ctrl+c")))
+	helpContent = append(helpContent, "")
+	helpContent = append(helpContent, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Press esc, q, or ? to close this help screen"))
+
+	help := helpStyle.Render(strings.Join(helpContent, "\n"))
+	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, help)
 }
 
 func (m model) renderContentSearchView() string {

@@ -68,6 +68,8 @@ scout /path/to/directory
 
 ## Keyboard Shortcuts
 
+**Press `?` at any time to view the in-app help screen with all keyboard shortcuts!**
+
 ### Navigation
 - **`↑/↓` or `j/k`** - Move cursor up/down
 - **`ctrl+d`** - Half-page down
@@ -123,6 +125,7 @@ scout /path/to/directory
 - **`w/s`** - Scroll preview up/down (also works with alt+up/down)
 
 ### General
+- **`?`** - Show help screen with all keyboard shortcuts
 - **`q/ctrl+c`** - Quit Scout
 
 ## Configuration
