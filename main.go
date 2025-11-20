@@ -1979,34 +1979,22 @@ func (m model) renderStatusBar() string {
 		helpPlainText = "↑↓: nav • /: search • enter: open • e: edit • o: vscode • R: rename • D: delete • N/M: new • c/x: copy/cut • P: paste • space: select • p: preview • b: bookmarks • S: sort • ?: help"
 	}
 
-	// Combine sections with proper background
-	// Calculate actual plain text lengths (without styling)
+	// Combine sections - use fixed widths to avoid overlap
 	leftWidth := len(leftInfo)
 	rightWidth := len(helpPlainText)
+	centerWidth := m.width - leftWidth - rightWidth - 6 // account for padding
 
-	// Create base style with background
-	baseStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("235")).
-		Foreground(lipgloss.Color("252"))
-
-	// Left section - file info
-	leftSection := baseStyle.Render(leftInfo)
-
-	// Calculate spacing needed
-	totalContentWidth := leftWidth + rightWidth
-	spacingWidth := m.width - totalContentWidth - 4 // Account for padding
-	if spacingWidth < 1 {
-		spacingWidth = 1
+	if centerWidth < 0 {
+		centerWidth = 0
 	}
 
-	// Center spacer with background
-	spacer := baseStyle.Width(spacingWidth).Render(center)
+	// Create sections without background first
+	leftSection := lipgloss.NewStyle().Width(leftWidth + 2).Render(leftInfo)
+	centerSection := lipgloss.NewStyle().Width(centerWidth).Align(lipgloss.Center).Render(center)
+	rightSection := lipgloss.NewStyle().Width(rightWidth + 2).Align(lipgloss.Right).Render(help)
 
-	// Right section - help hints, right-aligned
-	rightSection := baseStyle.Render(help)
-
-	// Join all sections with same background
-	combined := lipgloss.JoinHorizontal(lipgloss.Top, leftSection, spacer, rightSection)
+	// Join them together
+	combined := lipgloss.JoinHorizontal(lipgloss.Top, leftSection, centerSection, rightSection)
 
 	// Apply full-width background to entire status bar
 	return statusStyle.Render(combined)
