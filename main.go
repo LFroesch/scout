@@ -1599,8 +1599,18 @@ func (m model) renderFileList(width int) string {
 
 	var items []string
 
-	// Calculate visible range
-	visibleHeight := availableHeight
+	// Add sticky header with directory and item count
+	dirName := filepath.Base(m.currentDir)
+	if dirName == "" || dirName == "." {
+		dirName = m.currentDir
+	}
+	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
+	header := fmt.Sprintf("📁 %s  •  Items: %d", dirName, len(m.filteredFiles))
+	items = append(items, headerStyle.Render(header))
+	items = append(items, "") // Empty line for spacing
+
+	// Calculate visible range (reduced by 2 for header)
+	visibleHeight := availableHeight - 2
 	startIdx := m.scrollOffset
 	endIdx := startIdx + visibleHeight
 
