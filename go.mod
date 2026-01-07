@@ -1,4 +1,4 @@
-module scout
+module github.com/LFroesch/scout
 
 go 1.23.3
 

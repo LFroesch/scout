@@ -41,18 +41,12 @@ A lightning-fast TUI file explorer and fuzzy finder for developers. Navigate, se
 ## Installation
 
 ```bash
-# Clone the repository
-git clone <your-repo>/scout
-cd scout
+go install github.com/LFroesch/scout@latest
+```
 
-# Build
-go build -o scout main.go
-
-# Install globally
-cp scout ~/.local/bin/
-
-# Make sure ~/.local/bin is in PATH
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+Make sure `$GOPATH/bin` (usually `~/go/bin`) is in your PATH:
+```bash
+echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
