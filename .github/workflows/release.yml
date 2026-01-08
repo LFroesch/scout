@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.3'
+
+      - name: Build binaries
+        run: |
+          # Linux amd64
+          GOOS=linux GOARCH=amd64 go build -o scout-linux-amd64 .
+
+          # Linux arm64
+          GOOS=linux GOARCH=arm64 go build -o scout-linux-arm64 .
+
+          # macOS amd64 (Intel)
+          GOOS=darwin GOARCH=amd64 go build -o scout-darwin-amd64 .
+
+          # macOS arm64 (Apple Silicon)
+          GOOS=darwin GOARCH=arm64 go build -o scout-darwin-arm64 .
+
+          # Windows amd64
+          GOOS=windows GOARCH=amd64 go build -o scout-windows-amd64.exe .
+
+      - name: Generate checksums
+        run: |
+          sha256sum scout-* > checksums.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            scout-linux-amd64
+            scout-linux-arm64
+            scout-darwin-amd64
+            scout-darwin-arm64
+            scout-windows-amd64.exe
+            checksums.txt
+          generate_release_notes: true
