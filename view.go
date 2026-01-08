@@ -860,73 +860,116 @@ func (m model) renderHelpView() string {
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
 	sectionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 
-	var helpContent []string
-	helpContent = append(helpContent, sectionStyle.Render("🔍 Scout Keyboard Shortcuts"))
-	helpContent = append(helpContent, "")
+	// Build all help content lines
+	var allHelpContent []string
+	allHelpContent = append(allHelpContent, sectionStyle.Render("🔍 Scout Keyboard Shortcuts"))
+	allHelpContent = append(allHelpContent, "")
 
 	// Navigation section
-	helpContent = append(helpContent, sectionStyle.Render("Navigation:"))
-	helpContent = append(helpContent, fmt.Sprintf("  %s          Move up/down", keyStyle.Render("↑/↓ or j/k")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s         Scroll preview pane up/down", keyStyle.Render("w/s")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s          Jump to top/bottom", keyStyle.Render("g/G")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s       Half-page up/down", keyStyle.Render("ctrl+u/d")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s       Full-page up/down", keyStyle.Render("ctrl+b/f")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s         Go to home directory", keyStyle.Render("~")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s         Go back", keyStyle.Render("esc")))
-	helpContent = append(helpContent, "")
+	allHelpContent = append(allHelpContent, sectionStyle.Render("Navigation:"))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s          Move up/down", keyStyle.Render("↑/↓ or j/k")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s         Scroll preview pane up/down", keyStyle.Render("w/s")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s          Jump to top/bottom", keyStyle.Render("g/G")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Half-page up/down", keyStyle.Render("ctrl+u/d")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Full-page up/down", keyStyle.Render("ctrl+b/f")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s         Go to home directory", keyStyle.Render("~")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s         Go back", keyStyle.Render("esc")))
+	allHelpContent = append(allHelpContent, "")
 
 	// File Operations section
-	helpContent = append(helpContent, sectionStyle.Render("File Operations:"))
-	helpContent = append(helpContent, fmt.Sprintf("  %s           Open file/directory", keyStyle.Render("enter")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Open in VS Code", keyStyle.Render("o")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Edit file", keyStyle.Render("e")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Rename file/directory", keyStyle.Render("R")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Delete file/directory", keyStyle.Render("D")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Create new file", keyStyle.Render("N")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Create new directory", keyStyle.Render("M")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Refresh current view", keyStyle.Render("r")))
-	helpContent = append(helpContent, "")
+	allHelpContent = append(allHelpContent, sectionStyle.Render("File Operations:"))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Open file/directory", keyStyle.Render("enter")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Open in VS Code", keyStyle.Render("o")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Edit file", keyStyle.Render("e")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Rename file/directory", keyStyle.Render("R")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Delete file/directory", keyStyle.Render("D")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Create new file", keyStyle.Render("N")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Create new directory", keyStyle.Render("M")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Refresh current view", keyStyle.Render("r")))
+	allHelpContent = append(allHelpContent, "")
 
 	// Clipboard Operations section
-	helpContent = append(helpContent, sectionStyle.Render("Clipboard:"))
-	helpContent = append(helpContent, fmt.Sprintf("  %s           Copy selected files", keyStyle.Render("c")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s           Cut selected files", keyStyle.Render("x")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s           Paste files", keyStyle.Render("P")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s           Copy path to clipboard", keyStyle.Render("y")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s       Toggle selection (for bulk ops)", keyStyle.Render("space")))
-	helpContent = append(helpContent, "")
+	allHelpContent = append(allHelpContent, sectionStyle.Render("Clipboard:"))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Copy selected files", keyStyle.Render("c")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Cut selected files", keyStyle.Render("x")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Paste files", keyStyle.Render("P")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Copy path to clipboard", keyStyle.Render("y")))
+	allHelpContent = append(allHelpContent, "")
 
 	// Search & Filter section
-	helpContent = append(helpContent, sectionStyle.Render("Search & Filter:"))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Search by filename", keyStyle.Render("/")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s       Search file content (ripgrep)", keyStyle.Render("ctrl+g")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s       Toggle recursive search", keyStyle.Render("ctrl+r")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Open sort menu", keyStyle.Render("S")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Toggle hidden files", keyStyle.Render(".")))
-	helpContent = append(helpContent, "")
-
-	// View Options section
-	helpContent = append(helpContent, sectionStyle.Render("View Options:"))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Toggle preview pane", keyStyle.Render("p")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Toggle dual pane mode", keyStyle.Render("T")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s           Switch active pane", keyStyle.Render("tab")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Toggle permissions display", keyStyle.Render("I")))
-	helpContent = append(helpContent, "")
+	allHelpContent = append(allHelpContent, sectionStyle.Render("Search & Filter:"))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Search by filename", keyStyle.Render("/")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Search file content (ripgrep)", keyStyle.Render("ctrl+g")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Toggle recursive search", keyStyle.Render("ctrl+r")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Open sort menu", keyStyle.Render("S")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Toggle hidden files", keyStyle.Render(".")))
+	allHelpContent = append(allHelpContent, "")
 
 	// Bookmarks section
-	helpContent = append(helpContent, sectionStyle.Render("Bookmarks:"))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             View bookmarks", keyStyle.Render("b")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Add bookmark", keyStyle.Render("B")))
-	helpContent = append(helpContent, "")
+	allHelpContent = append(allHelpContent, sectionStyle.Render("Bookmarks:"))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             View bookmarks", keyStyle.Render("b")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Add bookmark", keyStyle.Render("B")))
+	allHelpContent = append(allHelpContent, "")
 
 	// Other section
-	helpContent = append(helpContent, sectionStyle.Render("Other:"))
-	helpContent = append(helpContent, fmt.Sprintf("  %s             Show this help screen", keyStyle.Render("?")))
-	helpContent = append(helpContent, fmt.Sprintf("  %s       Quit Scout", keyStyle.Render("q / ctrl+c")))
-	helpContent = append(helpContent, "")
-	helpContent = append(helpContent, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Press esc, q, or ? to close this help screen"))
+	allHelpContent = append(allHelpContent, sectionStyle.Render("Other:"))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Show this help screen", keyStyle.Render("?")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Quit Scout", keyStyle.Render("q / ctrl+c")))
+	allHelpContent = append(allHelpContent, "")
+	allHelpContent = append(allHelpContent, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Press esc, q, or ? to close this help screen"))
 
-	help := helpStyle.Render(strings.Join(helpContent, "\n"))
+	// Calculate scrollable content area
+	scrollableHeight := availableHeight
+	if scrollableHeight < 3 {
+		scrollableHeight = 3
+	}
+
+	// Apply scrolling
+	startLine := m.helpScroll
+	endLine := startLine + scrollableHeight
+	if endLine > len(allHelpContent) {
+		endLine = len(allHelpContent)
+	}
+	if startLine >= len(allHelpContent) {
+		startLine = 0
+		endLine = scrollableHeight
+		if endLine > len(allHelpContent) {
+			endLine = len(allHelpContent)
+		}
+	}
+
+	// Reserve space for scroll indicators
+	maxContentLines := scrollableHeight
+	hasTopIndicator := startLine > 0
+	hasBottomIndicator := endLine < len(allHelpContent)
+
+	if hasTopIndicator {
+		maxContentLines--
+	}
+	if hasBottomIndicator {
+		maxContentLines--
+	}
+
+	// Adjust endLine to fit within maxContentLines
+	if endLine > startLine+maxContentLines {
+		endLine = startLine + maxContentLines
+	}
+
+	// Build visible content with scroll indicators
+	var visibleContent []string
+	if hasTopIndicator {
+		visibleContent = append(visibleContent, "▲ More above (j/k to scroll)...")
+	}
+
+	if startLine < len(allHelpContent) && endLine > startLine {
+		visibleContent = append(visibleContent, allHelpContent[startLine:endLine]...)
+	}
+
+	if hasBottomIndicator && endLine < len(allHelpContent) {
+		visibleContent = append(visibleContent, "▼ More below (j/k to scroll)...")
+	}
+
+	help := helpStyle.Render(strings.Join(visibleContent, "\n"))
 	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, help)
 }
 

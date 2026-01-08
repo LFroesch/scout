@@ -2,6 +2,7 @@
 
 ## Current Tasks
 
+- Add simple undo feature (u key) - restore last deleted file from trash
 - Add speed dial to bookmarks [1-9 or w/e]
 - add Entire System fuzzy? ish? search
 - clean orphaned code/readme stuff etc
@@ -30,21 +31,11 @@
    - [ ] Symlink detection - Don't follow loops, show → target
    - [ ] Permission validation - Check before attempting operations
    - [ ] Confirmation for bulk delete (>5 files)
-   - [ ] Undo system or trash instead of rm (already using trash, but no undo)
-   - [ ] File size warnings (deleting >100MB? confirm first)
+   - [ ] Simple undo (u key to restore last deletion)
 
-3. **Bulk Operations UX** - Multi-select exists but confusing
-   - [ ] Show "5 files selected" in status bar
-   - [ ] Highlight all selected files differently
-   - [ ] "Select all" keybind (ctrl+a)
-   - [ ] "Deselect all" keybind (ctrl+d)
-   - [ ] Preview what bulk operation will do before executing
+3. **Remove Bulk Operations UX/Related Code / Orphaned Code/Keybinds**
 
-4. **Search Performance** - Prevent freezing on large directories
-   - [x] Debounce (require 2+ chars before expensive searches)
-   - [ ] Limit results to 1000 max with "... 500 more" message
-   - [ ] Add timeout for searches >5 seconds
-   - [ ] Show progress for slow operations
+4. Mouse support?
 
 5. **Missing Essential Features**
    - [ ] Speed dial bookmarks (1-9 keys to jump)
@@ -54,15 +45,6 @@
    - [ ] Diff view for git changes
 
 ### Code Quality & Architecture
-- [x] **Refactor main.go into modules** (COMPLETED)
-  - [x] config/ - Configuration management
-  - [x] search/ - Fuzzy search & content search
-  - [x] fileops/ - File operations (copy, move, delete, trash)
-  - [x] git/ - Git integration
-  - [x] utils/ - Utilities (icons, formatting, type detection)
-  - [x] ui/ - Split main.go into model.go, update.go, view.go, helpers.go (M-U-V pattern)
-  - Each module/file has clear responsibility ✓
-  - Clear separation of concerns ✓
 
 - [ ] **Add comprehensive error handling**
   - Wrap all exec.Command() calls with proper error handling
@@ -104,8 +86,6 @@
 ## Future Tasks
 
 ### Features
-- [ ] Independent right pane navigation (main.go:1572 TODO)
-- [ ] Plugin system for extensibility
 - [ ] Configuration via TUI settings menu
 - [ ] Customizable keybindings
 - [ ] Theme support
@@ -113,7 +93,7 @@
 ### Performance
 - [ ] Benchmark large directory performance
 - [ ] Optimize fuzzy search algorithm
-- [ ] Cache git status checks
+- [ ] Cache git status checks/more?
 - [ ] Lazy load file previews
 
 ### Distribution - **CRITICAL FOR DOWNLOADS**
@@ -127,17 +107,6 @@
 - No package managers = friction to install = no users
 
 **Action Items:**
-- [x] GitHub Actions workflow for releases
-  - Build binaries: linux-amd64, linux-arm64, darwin-amd64, darwin-arm64, windows-amd64
-  - Upload to GitHub Releases automatically on git tag
-  - Include checksums (sha256)
-
-- [x] One-liner install script
-  - Detects OS/arch automatically
-  - Downloads latest binary from GitHub releases
-  - Installs to ~/.local/bin or /usr/local/bin
-  - Usage: `curl -sSL https://raw.githubusercontent.com/LFroesch/scout/main/install.sh | sh`
-
 - [ ] Package Managers
   - [ ] Homebrew formula (tap: homebrew-scout)
   - [ ] AUR package (for Arch Linux)
