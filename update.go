@@ -59,7 +59,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.scrollOffset > maxScroll {
 				m.scrollOffset = maxScroll
 			}
-			if m.cursor >= m.scrollOffset + visibleHeight {
+			if m.cursor >= m.scrollOffset+visibleHeight {
 				m.scrollOffset = m.cursor - visibleHeight + 1
 			}
 		}
@@ -726,35 +726,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = modeSortMenu
 				m.sortMenuCursor = int(m.sortBy)
 
-			case "T":
-				// Toggle dual pane mode
-				m.dualPane = !m.dualPane
-				if m.dualPane {
-					m.statusMsg = "Dual pane mode enabled"
-				} else {
-					m.statusMsg = "Dual pane mode disabled"
-				}
-				m.statusExpiry = time.Now().Add(2 * time.Second)
-
-			case "tab":
-				// Switch active pane in dual mode
-				if m.dualPane {
-					m.activePane = 1 - m.activePane
-				}
-
 			case "?":
 				// Show help screen
 				m.mode = modeHelp
-
-			case "I":
-				// Toggle permissions display
-				m.permissions = !m.permissions
-				if m.permissions {
-					m.statusMsg = "Showing permissions"
-				} else {
-					m.statusMsg = "Hiding permissions"
-				}
-				m.statusExpiry = time.Now().Add(2 * time.Second)
 
 			case "ctrl+g":
 				// Content search (ripgrep)
@@ -770,4 +744,3 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	return m, nil
 }
-

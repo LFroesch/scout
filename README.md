@@ -24,7 +24,6 @@ A lightning-fast TUI file explorer and fuzzy finder for developers. Navigate, se
 
 ### Navigation & UI
 - **👁️ Live Preview** - See file contents without opening, with scrollable preview
-- **🖼️ Dual Pane Mode** - Side-by-side file management (toggle with T)
 - **📁 Smart Navigation** - Keyboard-driven interface with vim-like controls
 - **🏷️ File Icons** - Visual file type indicators for quick recognition
 - **📌 Smart Bookmarks** - Save and manage frequently accessed directories with frecency ranking
@@ -99,7 +98,6 @@ scout /path/to/directory
 - **`enter/l/→`** - Open directory or file
 - **`esc/h/←`** - Go to parent directory (respects root path limit)
 - **`~`** - Go to home directory
-- **`tab`** - Switch between panes (dual pane mode only)
 
 ### Search & Filter
 - **`/`** - Enter fuzzy search mode (filename search)
@@ -124,7 +122,6 @@ scout /path/to/directory
 ### Sorting & Display
 - **`S`** - Open sort menu (sort by name/size/date/type)
 - **`I`** - Toggle permissions display
-- **`T`** - Toggle dual pane mode
 
 ### Bookmarks
 - **`b`** - Open bookmarks view
@@ -314,24 +311,6 @@ Scout is designed to be fast:
 3. Type the name and press `enter`
 ```
 
-### Bulk Operations
-```
-1. Navigate through files with `j/k`
-2. Press `space` to select files (✓ appears)
-3. Select multiple files
-4. Press `c` to copy all selected files
-5. Navigate to destination
-6. Press `P` to paste all at once
-```
-
-### Dual Pane Mode
-```
-1. Press `T` to toggle dual pane mode
-2. Two file lists appear side by side
-3. Press `tab` to switch between panes
-4. Useful for comparing directories or copying files
-```
-
 ### Sorting Files
 ```
 1. Press `S` to open sort menu
@@ -398,9 +377,7 @@ Scout is designed to be fast:
 - **Root boundary**: Configure `root_path` to prevent accidentally navigating above your work directory
 - **Content search**: Install ripgrep (`rg`) for powerful content search - find text inside files instantly
 - **Safe deletion**: Install `gio` or `trash-put` to move deleted files to trash instead of permanent deletion
-- **Bulk operations**: Select multiple files with `space`, then use `c`/`x`/`P` for efficient file management
 - **Git awareness**: Modified files show [M] marker and current branch displays in header
-- **Dual pane mode**: Use `T` for dual pane mode when copying/moving files between directories
 - **Recursive search**: Use `ctrl+r` in search mode to search your entire project - perfect for finding files deep in the tree
 - **Fast navigation**: Use `ctrl+d`/`ctrl+u` for half-page jumps, `ctrl+f`/`ctrl+b` for full-page
 - **Frecency magic**: The more you use Scout, the smarter your bookmarks become - most-used directories rise to the top
