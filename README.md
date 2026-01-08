@@ -40,6 +40,30 @@ A lightning-fast TUI file explorer and fuzzy finder for developers. Navigate, se
 
 ## Installation
 
+### Quick Install (Recommended)
+
+**One-liner install script** - automatically detects your OS and architecture:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/LFroesch/scout/main/install.sh | sh
+```
+
+This downloads the latest pre-compiled binary and installs it to your PATH. No Go required!
+
+### Pre-compiled Binaries
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/LFroesch/scout/releases):
+
+- **Linux** (amd64, arm64)
+- **macOS** (Intel, Apple Silicon)
+- **Windows** (amd64)
+
+Extract and add to your PATH.
+
+### Build from Source
+
+If you have Go installed:
+
 ```bash
 go install github.com/LFroesch/scout@latest
 ```
