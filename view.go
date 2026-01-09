@@ -23,6 +23,8 @@ func (m *model) View() string {
 	// Main content area
 	var mainContent string
 	switch m.mode {
+	case modeErrorDialog:
+		mainContent = m.renderErrorDialog()
 	case modeBookmarks:
 		mainContent = m.renderBookmarksView()
 	case modeConfirmDelete:
@@ -35,8 +37,6 @@ func (m *model) View() string {
 		mainContent = m.renderCreateFileDialog()
 	case modeCreateDir:
 		mainContent = m.renderCreateDirDialog()
-	case modeSortMenu:
-		mainContent = m.renderSortMenu()
 	case modeHelp:
 		mainContent = m.renderHelpView()
 	default:
@@ -98,39 +98,64 @@ func (m model) renderHeader() string {
 	}
 
 	if m.mode == modeSearch {
-		// Build search text with mode indicator and hint
-		searchType := "FILENAME"
+		// Show search in top-right of header
+		var searchMode string
 		if m.currentSearchType == searchContent {
-			searchType = "CONTENT"
+			searchMode = "CONTENT SEARCH"
+		} else if m.recursiveSearch {
+			searchMode = "RECURSIVE SEARCH"
+		} else {
+			searchMode = "FILE SEARCH"
 		}
 
-		searchMode := "CURRENT DIR"
-		if m.recursiveSearch {
-			searchMode = "RECURSIVE"
-		}
+		// Build search parts with different colors
+		purpleStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("235")).
+			Foreground(lipgloss.Color("105"))
 
-		searchLabel := fmt.Sprintf("🔍 %s [%s]: ", searchType, searchMode)
-		hint := " (ctrl+r: toggle recursive | esc: cancel)"
+		grayStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("235")).
+			Foreground(lipgloss.Color("252"))
 
-		// Get the raw search value (not View() which has its own styling)
+		yellowStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("235")).
+			Foreground(lipgloss.Color("226"))
+
+		searchLabel := fmt.Sprintf("🔍 %s: ", searchMode)
 		searchValue := m.searchInput.Value()
+		hint := " (Tab: cycle modes | ESC: clear/exit)"
 
-		// Show cursor position with a visible indicator
+		// Show cursor in search with yellow color
 		cursorPos := m.searchInput.Position()
 		displayValue := searchValue
+		var cursorChar string
 		if len(displayValue) == 0 {
-			displayValue = "_" // Show cursor when empty
+			cursorChar = "_"
 		} else if cursorPos < len(displayValue) {
-			// Insert cursor indicator at position
-			displayValue = displayValue[:cursorPos] + "|" + displayValue[cursorPos:]
+			cursorChar = "|"
+			displayValue = displayValue[:cursorPos] + "{{CURSOR}}" + displayValue[cursorPos:]
 		} else {
-			displayValue = displayValue + "|"
+			cursorChar = "|"
+			displayValue = displayValue + "{{CURSOR}}"
 		}
 
-		// Construct the full search text
-		searchText := searchLabel + displayValue + hint
+		// Render parts: purple label + gray text + yellow cursor + purple hint
+		searchLabelRendered := purpleStyle.Render(searchLabel)
 
-		// Calculate available width for title section
+		// Split displayValue by cursor placeholder
+		parts := strings.Split(displayValue, "{{CURSOR}}")
+		var displayRendered string
+		if len(parts) == 2 {
+			displayRendered = grayStyle.Render(parts[0]) + yellowStyle.Render(cursorChar) + grayStyle.Render(parts[1])
+		} else {
+			displayRendered = grayStyle.Render(displayValue)
+		}
+
+		hintRendered := purpleStyle.Render(hint)
+
+		searchText := searchLabelRendered + displayRendered + hintRendered
+
+		// Calculate widths for split layout
 		searchTextLen := lipgloss.Width(searchText)
 		titleWidth := m.width - searchTextLen - 2
 		if titleWidth < 20 {
@@ -138,25 +163,19 @@ func (m model) renderHeader() string {
 			searchTextLen = m.width - titleWidth - 2
 		}
 
-		// Apply consistent background to both sections
+		// Style the title part
 		baseStyle := lipgloss.NewStyle().
 			Background(lipgloss.Color("235")).
 			Foreground(lipgloss.Color("252"))
 
-		searchStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("235")).
-			Foreground(lipgloss.Color("226"))
-
 		titlePart := baseStyle.Width(titleWidth).Padding(0, 1).Render(title)
-		searchPart := searchStyle.Width(searchTextLen).Render(searchText)
+		searchPart := searchText
 
-		// Join with full background
 		title = lipgloss.JoinHorizontal(lipgloss.Top, titlePart, searchPart)
 	}
 
-	// Return with or without additional styling
+	// Return with full width background for search mode
 	if m.mode == modeSearch {
-		// Already has background applied, return with full width
 		return lipgloss.NewStyle().
 			Background(lipgloss.Color("235")).
 			Width(m.width).
@@ -165,94 +184,168 @@ func (m model) renderHeader() string {
 	return titleStyle.Render(title)
 }
 
-func (m model) renderFileList(width int) string {
-	// Use same height calculation as preview for consistency
-	availableHeight := m.height - 9
+func (m *model) renderStatusBar() string {
+	// Normal status bar
+	statusStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255")).
+		Background(lipgloss.Color("240")).
+		Padding(0, 1).
+		Width(m.width)
+
+	var statusText string
+	var rightSide string
+
+	// Bookmark mode has special status bar
+	if m.mode == modeBookmarks {
+		if len(m.sortedBookmarkPaths) > 0 && m.bookmarksCursor < len(m.sortedBookmarkPaths) {
+			// Show current bookmark path on left
+			statusText = m.sortedBookmarkPaths[m.bookmarksCursor]
+		} else {
+			statusText = "No bookmarks"
+		}
+		// Show keybinds on right
+		rightSide = "enter: open | o: VS Code | d: delete | esc: back"
+	} else {
+		// File count and position info
+		if len(m.filteredFiles) > 0 {
+			fileCountInfo := fmt.Sprintf("%d/%d", m.cursor+1, len(m.filteredFiles))
+			statusText = fileCountInfo
+		}
+
+		// Git info
+		if m.gitBranch != "" {
+			gitInfo := fmt.Sprintf(" | Branch: %s", m.gitBranch)
+			statusText += gitInfo
+		}
+
+		// Clipboard info
+		if len(m.clipboard) > 0 {
+			opStr := "copied"
+			if m.clipboardOp == opCut {
+				opStr = "cut"
+			}
+			statusText += fmt.Sprintf(" | %d %s", len(m.clipboard), opStr)
+		}
+
+		// Loading indicator
+		if m.loading {
+			statusText += " | Searching..."
+		}
+
+		// Status message (temporary)
+		if m.statusMsg != "" {
+			statusText += " | " + m.statusMsg
+		}
+
+		// Sort mode indicator (on left side)
+		sortNames := map[sortMode]string{
+			sortByName: "Name",
+			sortBySize: "Size",
+			sortByDate: "Date",
+			sortByType: "Type",
+		}
+		statusText += fmt.Sprintf(" | Sort: %s (S)", sortNames[m.sortBy])
+
+		// Help hint (on right side)
+		rightSide = "? for help"
+	}
+
+	totalWidth := m.width - 2 // Account for padding
+	padding := totalWidth - lipgloss.Width(statusText) - lipgloss.Width(rightSide) - 3
+	if padding < 1 {
+		padding = 1
+	}
+	statusText += strings.Repeat(" ", padding) + rightSide
+
+	return statusStyle.Render(statusText)
+}
+
+// renderFileList renders the file list panel with the given width
+func (m *model) renderFileList(width int) string {
+	// Calculate available height for file list
+	availableHeight := m.height - 9 // Account for header, status, borders, padding
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
 
-	// Sticky header (outside the scrollable area)
+	// Reserve space for scroll indicators (2 lines)
+	contentHeight := availableHeight - 2
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
+	// Create header with current directory info
 	dirName := filepath.Base(m.currentDir)
-	if dirName == "" || dirName == "." {
-		dirName = m.currentDir
+	if m.currentDir == "/" {
+		dirName = "/"
 	}
+
+	var searchModeIndicator string
+	if m.mode == modeSearch {
+		if m.currentSearchType == searchContent {
+			searchModeIndicator = " [CONTENT]"
+		} else if m.recursiveSearch {
+			searchModeIndicator = " [RECURSIVE]"
+		} else {
+			searchModeIndicator = " [CURRENT DIR]"
+		}
+	}
+
 	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("99")).
 		Bold(true).
-		Width(width-4).
-		Padding(0, 1)
+		Foreground(lipgloss.Color("105")).
+		Width(width - 4)
 
-	hiddenIndicator := ""
-	if m.showHidden {
-		hiddenIndicator = "  •  👁️ Show hidden"
+	header := headerStyle.Render(fmt.Sprintf("📁 %s%s", dirName, searchModeIndicator))
+
+	// Calculate how many items we can show (reserve space for potential scroll indicators)
+	maxItems := contentHeight
+	if maxItems < 1 {
+		maxItems = 1
 	}
-	header := headerStyle.Render(fmt.Sprintf("📁 %s  •  Items: %d%s", dirName, len(m.filteredFiles), hiddenIndicator))
 
-	// Scrollable file list (reduced height for header)
-	listHeight := availableHeight - 1 // Reserve 1 line for header
+	// Check if we need scroll indicators FIRST (before adjusting cursor)
+	hasTopIndicator := m.scrollOffset > 0
+	hasBottomIndicator := m.scrollOffset+maxItems < len(m.filteredFiles)
+
+	// Reduce maxItems if we need scroll indicators
+	actualMaxItems := maxItems
+	if hasTopIndicator {
+		actualMaxItems--
+	}
+	if hasBottomIndicator {
+		actualMaxItems--
+	}
+	if actualMaxItems < 1 {
+		actualMaxItems = 1
+	}
+
+	// NOW adjust scroll offset to keep cursor visible (using actualMaxItems)
+	if m.cursor < m.scrollOffset {
+		m.scrollOffset = m.cursor
+	}
+	if m.cursor >= m.scrollOffset+actualMaxItems {
+		m.scrollOffset = m.cursor - actualMaxItems + 1
+	}
+
+	// Recalculate scroll indicators after adjusting offset
+	hasTopIndicator = m.scrollOffset > 0
+	hasBottomIndicator = m.scrollOffset+actualMaxItems < len(m.filteredFiles)
+
 	listStyle := lipgloss.NewStyle().
-		BorderForeground(lipgloss.Color("240")).
-		Width(width-2).
 		Padding(0, 1)
 
 	var items []string
 
-	// Calculate visible range - reserve space for scroll indicators
-	visibleHeight := listHeight
-	hasTopIndicator := m.scrollOffset > 0
-	hasBottomIndicator := false // Will determine after initial calculation
-
+	// Calculate visible range using actualMaxItems
 	startIdx := m.scrollOffset
-	endIdx := startIdx + visibleHeight
-
+	endIdx := m.scrollOffset + actualMaxItems
 	if endIdx > len(m.filteredFiles) {
 		endIdx = len(m.filteredFiles)
 	}
 
-	// Adjust scroll offset if cursor is out of view
-	if m.cursor < startIdx {
-		m.scrollOffset = m.cursor
-		startIdx = m.cursor
-		endIdx = startIdx + visibleHeight
-		if endIdx > len(m.filteredFiles) {
-			endIdx = len(m.filteredFiles)
-		}
-	} else if m.cursor >= endIdx {
-		endIdx = m.cursor + 1
-		startIdx = endIdx - visibleHeight
-		if startIdx < 0 {
-			startIdx = 0
-		}
-		m.scrollOffset = startIdx
-	}
-
-	// Now determine if we need indicators and adjust accordingly
-	hasTopIndicator = startIdx > 0
-	hasBottomIndicator = endIdx < len(m.filteredFiles)
-
-	// Reduce visible items to make room for indicators
-	maxItems := visibleHeight
-	if hasTopIndicator {
-		maxItems--
-	}
-	if hasBottomIndicator {
-		maxItems--
-	}
-
-	// Adjust endIdx to respect maxItems
-	if endIdx > startIdx+maxItems {
-		endIdx = startIdx + maxItems
-	}
-
 	for i := startIdx; i < endIdx && i < len(m.filteredFiles); i++ {
 		item := m.filteredFiles[i]
-
-		// Selection checkbox
-		checkbox := "  "
-		if item.selected {
-			checkbox = "✓ "
-		}
 
 		// Icon
 		icon := "📄"
@@ -266,11 +359,15 @@ func (m model) renderFileList(width int) string {
 			icon = utils.GetFileIcon(item.name)
 		}
 
-		// Git status
+		// Git status and symlink indicator (grouped together)
 		gitStatus := ""
 		if m.gitModified[item.path] {
 			modifiedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 			gitStatus = " " + modifiedStyle.Render("[M]")
+		}
+		if item.isSymlink {
+			symlinkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("cyan"))
+			gitStatus += " " + symlinkStyle.Render("[→]")
 		}
 
 		// Format item with highlighting if in search mode
@@ -291,8 +388,8 @@ func (m model) renderFileList(width int) string {
 		}
 
 		// Calculate available width for filename
-		// Total width - checkbox(2) - icon(2) - gitStatus(4) - size(~10) - padding(4)
-		maxNameLen := width - 25
+		// Reserve space: icon(2) + gitStatus(4-8) + size(~10) + padding(8)
+		maxNameLen := width - 28
 		if maxNameLen < 10 {
 			maxNameLen = 10
 		}
@@ -310,8 +407,8 @@ func (m model) renderFileList(width int) string {
 			displayName = truncated + "..."
 		}
 
-		// Build left side: checkbox + icon + name + gitStatus
-		leftSide := fmt.Sprintf("%s%s %s%s", checkbox, icon, displayName, gitStatus)
+		// Build left side: icon + name + gitStatus (which includes symlink indicator)
+		leftSide := fmt.Sprintf("%s %s%s", icon, displayName, gitStatus)
 		leftWidth := lipgloss.Width(leftSide)
 
 		// Calculate padding to push size to the right
@@ -324,17 +421,15 @@ func (m model) renderFileList(width int) string {
 		// Build the line with size right-aligned
 		line := leftSide + strings.Repeat(" ", padding) + sizeStr
 
-		// Style based on selection
+		// Style based on selection (don't set Width here - we already calculated exact spacing)
 		if i == m.cursor {
 			selectedStyle := lipgloss.NewStyle().
 				Background(lipgloss.Color("57")).
-				Foreground(lipgloss.Color("230")).
-				Width(width - 4)
+				Foreground(lipgloss.Color("230"))
 			line = selectedStyle.Render(line)
 		} else {
 			normalStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("252")).
-				Width(width - 4)
+				Foreground(lipgloss.Color("252"))
 			line = normalStyle.Render(line)
 		}
 
@@ -362,11 +457,28 @@ func (m model) renderFileList(width int) string {
 	return borderStyle.Render(combined)
 }
 
-func (m model) renderPreview(width int) string {
+func (m *model) renderPreview(width int) string {
 	availableHeight := m.height - 9
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
+
+	// Reserve space for scroll indicators (2 lines)
+	contentHeight := availableHeight - 2
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("105")).
+		Width(width - 4)
+
+	header := headerStyle.Render("👁 Preview")
+
+	previewStyle := lipgloss.NewStyle().
+		Width(width-4).
+		Padding(0, 1)
 
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
@@ -374,332 +486,255 @@ func (m model) renderPreview(width int) string {
 		Width(width - 2).
 		Height(availableHeight + 2)
 
+	var content string
 	if len(m.previewLines) == 0 {
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
-			Italic(true).
-			Padding(0, 1)
-		return borderStyle.Render(emptyStyle.Render("No preview available"))
-	}
+		content = "No preview available"
+	} else {
+		// Calculate visible range
+		startIdx := m.previewScroll
+		endIdx := m.previewScroll + contentHeight
 
-	// Extract sticky header (first 2-4 lines that contain metadata)
-	headerLines := []string{}
-	contentStartIdx := 0
-	for i, line := range m.previewLines {
-		// Header ends at first empty line
-		if strings.TrimSpace(line) == "" {
-			contentStartIdx = i + 1
-			break
+		// Check if we need scroll indicators
+		hasTopIndicator := startIdx > 0
+		hasBottomIndicator := endIdx < len(m.previewLines)
+
+		// Adjust for indicators
+		if hasTopIndicator {
+			contentHeight--
 		}
-		headerLines = append(headerLines, line)
-		if i >= 5 { // Max 6 lines for header
-			contentStartIdx = i + 1
-			break
+		if hasBottomIndicator {
+			contentHeight--
 		}
-	}
-
-	// Render sticky header - truncate header lines too
-	maxHeaderWidth := width - 6
-	var truncatedHeaderLines []string
-	for _, line := range headerLines {
-		if lipgloss.Width(line) > maxHeaderWidth {
-			runes := []rune(line)
-			truncated := ""
-			for _, r := range runes {
-				if lipgloss.Width(truncated+string(r)+"...") > maxHeaderWidth {
-					break
-				}
-				truncated += string(r)
-			}
-			truncatedHeaderLines = append(truncatedHeaderLines, truncated+"...")
-		} else {
-			truncatedHeaderLines = append(truncatedHeaderLines, line)
+		if contentHeight < 1 {
+			contentHeight = 1
 		}
-	}
 
-	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("99")).
-		Bold(true).
-		Padding(0, 1)
-	header := headerStyle.Render(strings.Join(truncatedHeaderLines, "\n"))
-
-	// Calculate scrollable content area
-	headerLineCount := len(headerLines)
-	scrollableHeight := availableHeight - headerLineCount
-	if scrollableHeight < 3 {
-		scrollableHeight = 3
-	}
-
-	// Get scrollable content lines (skip header)
-	contentLines := m.previewLines[contentStartIdx:]
-
-	startLine := m.previewScroll
-	endLine := startLine + scrollableHeight
-	if endLine > len(contentLines) {
-		endLine = len(contentLines)
-	}
-	if startLine >= len(contentLines) {
-		startLine = 0
-		endLine = scrollableHeight
-		if endLine > len(contentLines) {
-			endLine = len(contentLines)
+		endIdx = startIdx + contentHeight
+		if endIdx > len(m.previewLines) {
+			endIdx = len(m.previewLines)
 		}
-	}
 
-	// Build scrollable content with strict line limit
-	// Reserve space for scroll indicators if needed
-	maxContentLines := scrollableHeight
-	hasTopIndicator := startLine > 0
-	hasBottomIndicator := endLine < len(contentLines)
-
-	if hasTopIndicator {
-		maxContentLines--
-	}
-	if hasBottomIndicator {
-		maxContentLines--
-	}
-
-	// Adjust endLine to fit within maxContentLines
-	if endLine > startLine+maxContentLines {
-		endLine = startLine + maxContentLines
-	}
-
-	var content []string
-	if hasTopIndicator {
-		content = append(content, "▲ w")
-	}
-
-	if startLine < len(contentLines) && endLine > startLine {
-		content = append(content, contentLines[startLine:endLine]...)
-	}
-
-	if hasBottomIndicator && endLine < len(contentLines) {
-		content = append(content, "▼ s")
-	}
-
-	// Aggressively truncate all lines to prevent ANY wrapping
-	// Be conservative with width to handle all edge cases
-	maxContentWidth := width - 8 // More conservative: borders(2) + padding(2) + safety margin(4)
-	if maxContentWidth < 10 {
-		maxContentWidth = 10
-	}
-
-	var truncatedContent []string
-	for _, line := range content {
-		lineWidth := lipgloss.Width(line)
-		if lineWidth > maxContentWidth {
-			// Truncate long lines
-			runes := []rune(line)
-			truncated := ""
-			for _, r := range runes {
-				testWidth := lipgloss.Width(truncated + string(r) + "...")
-				if testWidth > maxContentWidth {
-					break
-				}
-				truncated += string(r)
-			}
-			if truncated == "" && len(runes) > 0 {
-				// Even first char doesn't fit - just take it
-				truncated = string(runes[0])
-			}
-			truncatedContent = append(truncatedContent, truncated+"...")
-		} else {
-			truncatedContent = append(truncatedContent, line)
+		var lines []string
+		if hasTopIndicator {
+			lines = append(lines, "▲")
 		}
+		lines = append(lines, m.previewLines[startIdx:endIdx]...)
+		if hasBottomIndicator {
+			lines = append(lines, "▼")
+		}
+
+		content = strings.Join(lines, "\n")
 	}
 
-	// Don't set Width on contentStyle - it can cause unwanted wrapping
-	// We've already truncated lines manually above
-	contentStyle := lipgloss.NewStyle().
-		Padding(0, 1)
-	scrollContent := contentStyle.Render(strings.Join(truncatedContent, "\n"))
-
-	// Combine header and scrollable content
-	combined := header + "\n" + scrollContent
+	previewContent := previewStyle.Render(content)
+	combined := header + "\n" + previewContent
 	return borderStyle.Render(combined)
 }
 
 func (m model) renderBookmarksView() string {
-	// Calculate available height
 	availableHeight := m.height - 9
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
 
-	// Full width bookmarks panel
-	bookmarksStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("99")).
-		Width(m.width - 2).
-		Height(availableHeight + 2).
-		Padding(1)
+	// Reserve space for scroll indicators
+	contentHeight := availableHeight - 2
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
 
-	// Render bookmarks
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("105")).
+		Width(m.width - 4)
+
+	header := headerStyle.Render("📚 Bookmarks")
+
+	listStyle := lipgloss.NewStyle().
+		Padding(0, 1)
+
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Width(m.width - 2).
+		Height(availableHeight + 2)
+
 	var bookmarkItems []string
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-	headerText := fmt.Sprintf("📌 Bookmarks - Sorted by Frecency (%s navigate, %s go, %s vscode, %s delete)",
-		keyStyle.Render("↑↓:"),
-		keyStyle.Render("enter:"),
-		keyStyle.Render("o:"),
-		keyStyle.Render("d:"))
-	bookmarkItems = append(bookmarkItems, headerText)
-	bookmarkItems = append(bookmarkItems, "")
 
 	if len(m.sortedBookmarkPaths) == 0 {
-		bookmarkItems = append(bookmarkItems, "No bookmarks yet. Navigate to a directory and press 'B' to bookmark it.")
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Padding(1, 0)
+		bookmarkItems = []string{emptyStyle.Render("No bookmarks yet. Press 'B' in normal mode to add current directory.")}
 	} else {
-		// Use pre-sorted bookmarks from model
-		for i, bookmarkPath := range m.sortedBookmarkPaths {
-			icon := "📁"
-			name := filepath.Base(bookmarkPath)
+		// Calculate scroll position
+		maxItems := contentHeight
+		if maxItems < 1 {
+			maxItems = 1
+		}
+
+		// Check if we need scroll indicators
+		scrollOffset := 0
+		if m.bookmarksCursor >= maxItems {
+			scrollOffset = m.bookmarksCursor - maxItems + 1
+		}
+
+		hasTopIndicator := scrollOffset > 0
+		hasBottomIndicator := scrollOffset+maxItems < len(m.sortedBookmarkPaths)
+
+		// Adjust for indicators
+		actualMaxItems := maxItems
+		if hasTopIndicator {
+			actualMaxItems--
+		}
+		if hasBottomIndicator {
+			actualMaxItems--
+		}
+		if actualMaxItems < 1 {
+			actualMaxItems = 1
+		}
+
+		// Recalculate scroll offset with adjusted max
+		if m.bookmarksCursor >= scrollOffset+actualMaxItems {
+			scrollOffset = m.bookmarksCursor - actualMaxItems + 1
+		}
+		if m.bookmarksCursor < scrollOffset {
+			scrollOffset = m.bookmarksCursor
+		}
+
+		// Recalculate indicators
+		hasTopIndicator = scrollOffset > 0
+		hasBottomIndicator = scrollOffset+actualMaxItems < len(m.sortedBookmarkPaths)
+
+		// Add top indicator
+		if hasTopIndicator {
+			bookmarkItems = append(bookmarkItems, "▲ More bookmarks above...")
+		}
+
+		// Calculate visible range
+		startIdx := scrollOffset
+		endIdx := scrollOffset + actualMaxItems
+		if endIdx > len(m.sortedBookmarkPaths) {
+			endIdx = len(m.sortedBookmarkPaths)
+		}
+
+		// Render visible bookmarks
+		for i := startIdx; i < endIdx; i++ {
+			path := m.sortedBookmarkPaths[i]
+			name := filepath.Base(path)
 			if name == "" || name == "." {
-				name = bookmarkPath
+				name = path
 			}
 
-			// Show full path relative to root if possible
-			displayPath := bookmarkPath
-			if m.config.RootPath != "" && strings.HasPrefix(bookmarkPath, m.config.RootPath) {
-				rel, err := filepath.Rel(m.config.RootPath, bookmarkPath)
-				if err == nil && rel != "." {
-					displayPath = "~/" + rel
-				} else if rel == "." {
-					displayPath = "~"
+			icon := "📁"
+
+			// Frecency score (left side, before icon)
+			frecencyStr := ""
+			if score, ok := m.config.Frecency[path]; ok && score > 0 {
+				frecencyStr = fmt.Sprintf("×%-3d ", score)
+			} else {
+				frecencyStr = "     " // 5 spaces to align with "×99 "
+			}
+
+			// Truncate path if needed
+			maxPathLen := m.width - 30
+			if maxPathLen < 20 {
+				maxPathLen = 20
+			}
+			displayPath := path
+			if lipgloss.Width(path) > maxPathLen {
+				runes := []rune(path)
+				truncated := "..."
+				for j := len(runes) - 1; j >= 0; j-- {
+					if lipgloss.Width(truncated) >= maxPathLen {
+						break
+					}
+					truncated = string(runes[j]) + truncated
 				}
+				displayPath = "..." + truncated[3:]
 			}
 
-			// Show frecency score
-			frecencyInfo := ""
-			score := m.config.Frecency[bookmarkPath]
-			if score > 0 {
-				frecencyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("141"))
-				frecencyInfo = " " + frecencyStyle.Render(fmt.Sprintf("[%d visits]", score))
-			}
+			// Build line without colors: frecency + icon + name + path
+			line := fmt.Sprintf("%s%s %s (%s)", frecencyStr, icon, name, displayPath)
 
-			line := fmt.Sprintf("%s %s (%s)%s", icon, name, displayPath, frecencyInfo)
+			// Apply selection style with full width OR normal style with gray path
 			if i == m.bookmarksCursor {
 				selectedStyle := lipgloss.NewStyle().
 					Background(lipgloss.Color("57")).
 					Foreground(lipgloss.Color("230")).
-					Width(m.width - 6)
+					Width(m.width - 4)
 				line = selectedStyle.Render(line)
+			} else {
+				// For normal (non-selected) lines, style frecency and path separately
+				normalFrecencyStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("244"))
+				pathStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("244"))
+
+				styledFrecency := normalFrecencyStyle.Render(frecencyStr)
+				styledPath := pathStyle.Render(fmt.Sprintf("(%s)", displayPath))
+				line = fmt.Sprintf("%s%s %s %s", styledFrecency, icon, name, styledPath)
 			}
+
 			bookmarkItems = append(bookmarkItems, line)
+		}
+
+		// Add bottom indicator
+		if hasBottomIndicator {
+			bookmarkItems = append(bookmarkItems, "▼ More bookmarks below...")
 		}
 	}
 
-	return bookmarksStyle.Render(strings.Join(bookmarkItems, "\n"))
+	content := listStyle.Render(strings.Join(bookmarkItems, "\n"))
+	combined := header + "\n" + content
+	return borderStyle.Render(combined)
 }
 
 func (m model) renderConfirmDeleteView() string {
-	// Create a centered dialog box
 	dialogWidth := 60
 	dialogHeight := 8
 
 	if m.deleteBookmarkIndex < 0 || m.deleteBookmarkIndex >= len(m.config.Bookmarks) {
-		return "Error: Invalid bookmark"
+		return "Error: Invalid bookmark index"
 	}
 
-	bookmark := m.config.Bookmarks[m.deleteBookmarkIndex]
-	bookmarkName := filepath.Base(bookmark)
+	bookmarkPath := m.config.Bookmarks[m.deleteBookmarkIndex]
+	bookmarkName := filepath.Base(bookmarkPath)
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("196")). // Red border
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("196")).
+		Padding(1, 2).
 		Width(dialogWidth).
-		Height(dialogHeight).
-		Padding(1).
-		Align(lipgloss.Center)
+		Height(dialogHeight)
 
-	// Dialog content
-	var dialogContent []string
-	dialogContent = append(dialogContent, "⚠️  Confirm Delete Bookmark")
-	dialogContent = append(dialogContent, "")
-	dialogContent = append(dialogContent, fmt.Sprintf("Delete bookmark: %s", bookmarkName))
-	dialogContent = append(dialogContent, fmt.Sprintf("Path: %s", bookmark))
-	dialogContent = append(dialogContent, "")
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("196"))
 
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-	confirmText := fmt.Sprintf("%s Yes  %s No  %s Cancel",
-		keyStyle.Render("y:"),
-		keyStyle.Render("n:"),
-		keyStyle.Render("esc:"))
-	dialogContent = append(dialogContent, confirmText)
+	contentStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Padding(1, 0)
 
-	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
+	promptStyle := lipgloss.NewStyle().
+		Bold(true).
+		Padding(1, 0)
 
-	// Center the dialog on screen
-	dialogBox := lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
+	title := titleStyle.Render("⚠️  Delete Bookmark?")
+	content := contentStyle.Render(fmt.Sprintf("Are you sure you want to delete this bookmark?\n\n%s\n(%s)", bookmarkName, bookmarkPath))
+	prompt := promptStyle.Render("Press 'y' to confirm, 'n' or ESC to cancel")
 
-	return dialogBox
-}
+	dialog := title + "\n" + content + "\n" + prompt
+	rendered := dialogStyle.Render(dialog)
 
-func (m model) renderStatusBar() string {
-	bgColor := lipgloss.Color("235")
-	baseStyle := lipgloss.NewStyle().
-		Background(bgColor).
-		Foreground(lipgloss.Color("252"))
+	// Center the dialog
+	verticalPadding := (m.height - dialogHeight) / 2
+	horizontalPadding := (m.width - dialogWidth) / 2
 
-	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("99")).
-		Background(bgColor).
-		Bold(true)
+	centeredStyle := lipgloss.NewStyle().
+		Padding(verticalPadding, horizontalPadding)
 
-	// Build left content as plain text pieces
-	var leftParts []string
-
-	if m.mode == modeBookmarks {
-		if len(m.sortedBookmarkPaths) > 0 && m.bookmarksCursor < len(m.sortedBookmarkPaths) {
-			bookmark := m.sortedBookmarkPaths[m.bookmarksCursor]
-			bookmarkName := filepath.Base(bookmark)
-			if bookmarkName == "" || bookmarkName == "." {
-				bookmarkName = bookmark
-			}
-			leftParts = append(leftParts, baseStyle.Render(fmt.Sprintf("📁 %s → %s", bookmarkName, bookmark)))
-		}
-	} else if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
-		current := m.filteredFiles[m.cursor]
-		if current.isDir {
-			leftParts = append(leftParts, baseStyle.Render(fmt.Sprintf("📁 %s", current.name)))
-		} else {
-			leftParts = append(leftParts, baseStyle.Render(fmt.Sprintf("📄 %s (", current.name)))
-			leftParts = append(leftParts, utils.FormatFileSizeColored(current.size))
-			leftParts = append(leftParts, baseStyle.Render(")"))
-		}
-	}
-
-	if m.statusMsg != "" {
-		leftParts = append(leftParts, baseStyle.Render("  "+m.statusMsg))
-	}
-
-	// Build right side as separate pieces
-	rightParts := []string{
-		baseStyle.Render("Press "),
-		keyStyle.Render("?"),
-		baseStyle.Render(" for help"),
-	}
-
-	// Calculate total widths
-	leftWidth := 0
-	for _, part := range leftParts {
-		leftWidth += lipgloss.Width(part)
-	}
-
-	rightWidth := 0
-	for _, part := range rightParts {
-		rightWidth += lipgloss.Width(part)
-	}
-
-	spacingWidth := m.width - leftWidth - rightWidth
-	if spacingWidth < 1 {
-		spacingWidth = 1
-	}
-
-	// Join everything together
-	allParts := leftParts
-	allParts = append(allParts, baseStyle.Width(spacingWidth).Render(""))
-	allParts = append(allParts, rightParts...)
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, allParts...)
+	return centeredStyle.Render(rendered)
 }
 
 func (m model) renderConfirmFileDeleteView() string {
@@ -711,137 +746,154 @@ func (m model) renderConfirmFileDeleteView() string {
 	}
 
 	file := m.filteredFiles[m.cursor]
-	fileName := file.name
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
+		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("196")).
+		Padding(1, 2).
 		Width(dialogWidth).
-		Height(dialogHeight).
-		Padding(1).
-		Align(lipgloss.Center)
+		Height(dialogHeight)
 
-	var dialogContent []string
-	dialogContent = append(dialogContent, "⚠️  Confirm Delete")
-	dialogContent = append(dialogContent, "")
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("196"))
+
+	contentStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Padding(1, 0)
+
+	promptStyle := lipgloss.NewStyle().
+		Bold(true).
+		Padding(1, 0)
 
 	fileType := "file"
 	if file.isDir {
 		fileType = "directory"
 	}
-	dialogContent = append(dialogContent, fmt.Sprintf("Delete %s: %s", fileType, fileName))
-	dialogContent = append(dialogContent, "")
 
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-	confirmText := fmt.Sprintf("%s Yes  %s No  %s Cancel",
-		keyStyle.Render("y:"),
-		keyStyle.Render("n:"),
-		keyStyle.Render("esc:"))
-	dialogContent = append(dialogContent, confirmText)
+	title := titleStyle.Render(fmt.Sprintf("⚠️  Delete %s?", fileType))
+	content := contentStyle.Render(fmt.Sprintf("Are you sure you want to delete:\n\n%s\n\nThis will move it to trash if available.", file.name))
+	prompt := promptStyle.Render("Press 'y' to confirm, 'n' or ESC to cancel")
 
-	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
+	dialog := title + "\n" + content + "\n" + prompt
+	rendered := dialogStyle.Render(dialog)
+
+	// Center the dialog
+	verticalPadding := (m.height - dialogHeight) / 2
+	horizontalPadding := (m.width - dialogWidth) / 2
+
+	centeredStyle := lipgloss.NewStyle().
+		Padding(verticalPadding, horizontalPadding)
+
+	return centeredStyle.Render(rendered)
 }
 
 func (m model) renderRenameDialog() string {
 	dialogWidth := 60
-	dialogHeight := 6
+	dialogHeight := 8
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("99")).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("105")).
+		Padding(1, 2).
 		Width(dialogWidth).
-		Height(dialogHeight).
-		Padding(1)
+		Height(dialogHeight)
 
-	var dialogContent []string
-	dialogContent = append(dialogContent, "✏️  Rename")
-	dialogContent = append(dialogContent, "")
-	dialogContent = append(dialogContent, m.textInput.View())
-	dialogContent = append(dialogContent, "")
-	dialogContent = append(dialogContent, "Press Enter to confirm, Esc to cancel")
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("105"))
 
-	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
+	contentStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Padding(1, 0)
+
+	title := titleStyle.Render("✏️  Rename")
+	content := contentStyle.Render("Enter new name:")
+	inputView := m.textInput.View()
+
+	dialog := title + "\n" + content + "\n" + inputView
+	rendered := dialogStyle.Render(dialog)
+
+	// Center the dialog
+	verticalPadding := (m.height - dialogHeight) / 2
+	horizontalPadding := (m.width - dialogWidth) / 2
+
+	centeredStyle := lipgloss.NewStyle().
+		Padding(verticalPadding, horizontalPadding)
+
+	return centeredStyle.Render(rendered)
 }
 
 func (m model) renderCreateFileDialog() string {
 	dialogWidth := 60
-	dialogHeight := 6
+	dialogHeight := 8
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("99")).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("105")).
+		Padding(1, 2).
 		Width(dialogWidth).
-		Height(dialogHeight).
-		Padding(1)
+		Height(dialogHeight)
 
-	var dialogContent []string
-	dialogContent = append(dialogContent, "📄 Create New File")
-	dialogContent = append(dialogContent, "")
-	dialogContent = append(dialogContent, m.textInput.View())
-	dialogContent = append(dialogContent, "")
-	dialogContent = append(dialogContent, "Press Enter to confirm, Esc to cancel")
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("105"))
 
-	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
+	contentStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Padding(1, 0)
+
+	title := titleStyle.Render("📄 Create New File")
+	content := contentStyle.Render("Enter filename:")
+	inputView := m.textInput.View()
+
+	dialog := title + "\n" + content + "\n" + inputView
+	rendered := dialogStyle.Render(dialog)
+
+	// Center the dialog
+	verticalPadding := (m.height - dialogHeight) / 2
+	horizontalPadding := (m.width - dialogWidth) / 2
+
+	centeredStyle := lipgloss.NewStyle().
+		Padding(verticalPadding, horizontalPadding)
+
+	return centeredStyle.Render(rendered)
 }
 
 func (m model) renderCreateDirDialog() string {
 	dialogWidth := 60
-	dialogHeight := 6
+	dialogHeight := 8
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("99")).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("105")).
+		Padding(1, 2).
 		Width(dialogWidth).
-		Height(dialogHeight).
-		Padding(1)
+		Height(dialogHeight)
 
-	var dialogContent []string
-	dialogContent = append(dialogContent, "📁 Create New Directory")
-	dialogContent = append(dialogContent, "")
-	dialogContent = append(dialogContent, m.textInput.View())
-	dialogContent = append(dialogContent, "")
-	dialogContent = append(dialogContent, "Press Enter to confirm, Esc to cancel")
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("105"))
 
-	dialog := dialogStyle.Render(strings.Join(dialogContent, "\n"))
-	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, dialog)
-}
+	contentStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Padding(1, 0)
 
-func (m model) renderSortMenu() string {
-	dialogWidth := 40
-	dialogHeight := 10
+	title := titleStyle.Render("📁 Create New Directory")
+	content := contentStyle.Render("Enter directory name:")
+	inputView := m.textInput.View()
 
-	menuStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("99")).
-		Width(dialogWidth).
-		Height(dialogHeight).
-		Padding(1)
+	dialog := title + "\n" + content + "\n" + inputView
+	rendered := dialogStyle.Render(dialog)
 
-	var menuItems []string
-	menuItems = append(menuItems, "📊 Sort By")
-	menuItems = append(menuItems, "")
+	// Center the dialog
+	verticalPadding := (m.height - dialogHeight) / 2
+	horizontalPadding := (m.width - dialogWidth) / 2
 
-	sortOptions := []string{"Name", "Size", "Date", "Type"}
-	for i, option := range sortOptions {
-		prefix := "  "
-		if i == m.sortMenuCursor {
-			prefix = "▶ "
-		}
-		current := ""
-		if i == int(m.sortBy) {
-			current = " ✓"
-		}
-		menuItems = append(menuItems, fmt.Sprintf("%s%s%s", prefix, option, current))
-	}
+	centeredStyle := lipgloss.NewStyle().
+		Padding(verticalPadding, horizontalPadding)
 
-	menuItems = append(menuItems, "")
-	menuItems = append(menuItems, "Enter: Select • Esc: Cancel")
-
-	menu := menuStyle.Render(strings.Join(menuItems, "\n"))
-	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, menu)
+	return centeredStyle.Render(rendered)
 }
 
 func (m model) renderHelpView() string {
@@ -850,36 +902,65 @@ func (m model) renderHelpView() string {
 		availableHeight = 3
 	}
 
-	helpStyle := lipgloss.NewStyle().
+	// Reserve space for scroll indicators
+	contentHeight := availableHeight - 2
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("105")).
+		Width(m.width - 4)
+
+	header := headerStyle.Render("❓ Help")
+
+	listStyle := lipgloss.NewStyle().
+		Width(m.width-4).
+		Padding(0, 1)
+
+	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("99")).
-		Width(m.width - 4).
-		Height(availableHeight + 2).
-		Padding(1)
+		BorderForeground(lipgloss.Color("240")).
+		Width(m.width - 2).
+		Height(availableHeight + 2)
 
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-	sectionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	// Build help content
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("105")).
+		Bold(true)
 
-	// Build all help content lines
+	sectionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")).
+		Bold(true)
+
 	var allHelpContent []string
-	allHelpContent = append(allHelpContent, sectionStyle.Render("🔍 Scout Keyboard Shortcuts"))
-	allHelpContent = append(allHelpContent, "")
 
 	// Navigation section
 	allHelpContent = append(allHelpContent, sectionStyle.Render("Navigation:"))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s          Move up/down", keyStyle.Render("↑/↓ or j/k")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s         Scroll preview pane up/down", keyStyle.Render("w/s")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s          Jump to top/bottom", keyStyle.Render("g/G")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Half-page up/down", keyStyle.Render("ctrl+u/d")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Full-page up/down", keyStyle.Render("ctrl+b/f")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s         Go to home directory", keyStyle.Render("~")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s         Go back", keyStyle.Render("esc")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Move down", keyStyle.Render("j / ↓")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Move up", keyStyle.Render("k / ↑")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Enter directory / Open file", keyStyle.Render("enter / l / →")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Go to parent directory", keyStyle.Render("esc / h / ←")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Go to top", keyStyle.Render("g")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Go to bottom", keyStyle.Render("G")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Half-page down", keyStyle.Render("ctrl+d")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Half-page up", keyStyle.Render("ctrl+u")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Full-page down", keyStyle.Render("ctrl+f")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Full-page up", keyStyle.Render("ctrl+b")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Jump to home directory", keyStyle.Render("~")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Jump to /mnt/c (WSL)", keyStyle.Render("`")))
+	allHelpContent = append(allHelpContent, "")
+
+	// Preview Scrolling section
+	allHelpContent = append(allHelpContent, sectionStyle.Render("Preview Scrolling:"))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Scroll preview down", keyStyle.Render("s / alt+↓")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Scroll preview up", keyStyle.Render("w / alt+↑")))
 	allHelpContent = append(allHelpContent, "")
 
 	// File Operations section
 	allHelpContent = append(allHelpContent, sectionStyle.Render("File Operations:"))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Open file/directory", keyStyle.Render("enter")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Open in VS Code", keyStyle.Render("o")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Open file", keyStyle.Render("o")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Edit file", keyStyle.Render("e")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Rename file/directory", keyStyle.Render("R")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Delete file/directory", keyStyle.Render("D")))
@@ -890,18 +971,19 @@ func (m model) renderHelpView() string {
 
 	// Clipboard Operations section
 	allHelpContent = append(allHelpContent, sectionStyle.Render("Clipboard:"))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Copy selected files", keyStyle.Render("c")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Cut selected files", keyStyle.Render("x")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Paste files", keyStyle.Render("P")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Copy current file", keyStyle.Render("c")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Cut current file", keyStyle.Render("x")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Paste files", keyStyle.Render("p")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Copy path to clipboard", keyStyle.Render("y")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Undo last deletion", keyStyle.Render("u")))
 	allHelpContent = append(allHelpContent, "")
 
 	// Search & Filter section
 	allHelpContent = append(allHelpContent, sectionStyle.Render("Search & Filter:"))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Search by filename", keyStyle.Render("/")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Search file content (ripgrep)", keyStyle.Render("ctrl+g")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Toggle recursive search", keyStyle.Render("ctrl+r")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Open sort menu", keyStyle.Render("S")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Start search (File/Recursive/Content)", keyStyle.Render("/")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Cycle search modes (while searching)", keyStyle.Render("Tab")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s     Navigate results (while searching)", keyStyle.Render("↑/↓")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Cycle sort mode", keyStyle.Render("S")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Toggle hidden files", keyStyle.Render(".")))
 	allHelpContent = append(allHelpContent, "")
 
@@ -913,151 +995,95 @@ func (m model) renderHelpView() string {
 
 	// Other section
 	allHelpContent = append(allHelpContent, sectionStyle.Render("Other:"))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Show this help screen", keyStyle.Render("?")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Quit Scout", keyStyle.Render("q / ctrl+c")))
-	allHelpContent = append(allHelpContent, "")
-	allHelpContent = append(allHelpContent, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Press esc, q, or ? to close this help screen"))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Show this help", keyStyle.Render("?")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s   Quit", keyStyle.Render("q / ctrl+c")))
 
-	// Calculate scrollable content area
-	scrollableHeight := availableHeight
-	if scrollableHeight < 3 {
-		scrollableHeight = 3
-	}
+	// Calculate visible range
+	startIdx := m.helpScroll
+	endIdx := m.helpScroll + contentHeight
 
-	// Apply scrolling
-	startLine := m.helpScroll
-	endLine := startLine + scrollableHeight
-	if endLine > len(allHelpContent) {
-		endLine = len(allHelpContent)
-	}
-	if startLine >= len(allHelpContent) {
-		startLine = 0
-		endLine = scrollableHeight
-		if endLine > len(allHelpContent) {
-			endLine = len(allHelpContent)
-		}
-	}
+	// Check if we need scroll indicators
+	hasTopIndicator := startIdx > 0
+	hasBottomIndicator := endIdx < len(allHelpContent)
 
-	// Reserve space for scroll indicators
-	maxContentLines := scrollableHeight
-	hasTopIndicator := startLine > 0
-	hasBottomIndicator := endLine < len(allHelpContent)
-
+	// Adjust for indicators
 	if hasTopIndicator {
-		maxContentLines--
+		contentHeight--
 	}
 	if hasBottomIndicator {
-		maxContentLines--
+		contentHeight--
+	}
+	if contentHeight < 1 {
+		contentHeight = 1
 	}
 
-	// Adjust endLine to fit within maxContentLines
-	if endLine > startLine+maxContentLines {
-		endLine = startLine + maxContentLines
+	endIdx = startIdx + contentHeight
+	if endIdx > len(allHelpContent) {
+		endIdx = len(allHelpContent)
 	}
 
-	// Build visible content with scroll indicators
-	var visibleContent []string
+	// Adjust scroll bounds
+	if m.helpScroll > len(allHelpContent)-contentHeight {
+		m.helpScroll = len(allHelpContent) - contentHeight
+		if m.helpScroll < 0 {
+			m.helpScroll = 0
+		}
+	}
+
+	var displayLines []string
 	if hasTopIndicator {
-		visibleContent = append(visibleContent, "▲ More above (j/k to scroll)...")
+		displayLines = append(displayLines, "▲")
+	}
+	if startIdx < len(allHelpContent) {
+		displayLines = append(displayLines, allHelpContent[startIdx:endIdx]...)
+	}
+	if hasBottomIndicator {
+		displayLines = append(displayLines, "▼")
 	}
 
-	if startLine < len(allHelpContent) && endLine > startLine {
-		visibleContent = append(visibleContent, allHelpContent[startLine:endLine]...)
-	}
+	content := strings.Join(displayLines, "\n")
+	listContent := listStyle.Render(content)
 
-	if hasBottomIndicator && endLine < len(allHelpContent) {
-		visibleContent = append(visibleContent, "▼ More below (j/k to scroll)...")
-	}
-
-	help := helpStyle.Render(strings.Join(visibleContent, "\n"))
-	return lipgloss.Place(m.width, m.height-7, lipgloss.Center, lipgloss.Center, help)
+	combined := header + "\n" + listContent
+	return borderStyle.Render(combined)
 }
 
-func (m model) renderContentSearchView() string {
-	availableHeight := m.height - 9
-	if availableHeight < 3 {
-		availableHeight = 3
-	}
+func (m model) renderErrorDialog() string {
+	dialogWidth := 70
+	dialogHeight := 15
 
-	searchStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("99")).
-		Width(m.width - 2).
-		Height(availableHeight + 2).
-		Padding(1)
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("196")).
+		Padding(1, 2).
+		Width(dialogWidth).
+		Height(dialogHeight)
 
-	var content []string
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("196"))
 
-	// Show search input if no results yet
-	if len(m.contentSearchResults) == 0 {
-		content = append(content, "🔍 Content Search (ripgrep)")
-		content = append(content, "")
-		content = append(content, m.textInput.View())
-		content = append(content, "")
-		content = append(content, "Type your search query and press Enter")
-		content = append(content, "")
-		content = append(content, "Esc: Cancel")
-	} else {
-		// Show results
-		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Bold(true)
-		header := fmt.Sprintf("🔍 Content Search Results (%d found) - %s navigate • %s open • %s close",
-			len(m.contentSearchResults),
-			keyStyle.Render("↑↓:"),
-			keyStyle.Render("o:"),
-			keyStyle.Render("esc:"))
-		content = append(content, header)
-		content = append(content, "")
+	contentStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Padding(1, 0)
 
-		// Show results with cursor
-		visibleResults := availableHeight - 4
-		if visibleResults < 1 {
-			visibleResults = 1
-		}
+	promptStyle := lipgloss.NewStyle().
+		Bold(true).
+		Padding(1, 0)
 
-		startIdx := m.contentSearchCursor
-		if startIdx > len(m.contentSearchResults)-visibleResults {
-			startIdx = len(m.contentSearchResults) - visibleResults
-		}
-		if startIdx < 0 {
-			startIdx = 0
-		}
+	title := titleStyle.Render("❌ Error")
+	content := contentStyle.Render(fmt.Sprintf("%s\n\nDetails:\n%s", m.errorMsg, m.errorDetails))
+	prompt := promptStyle.Render("Press any key to continue")
 
-		endIdx := startIdx + visibleResults
-		if endIdx > len(m.contentSearchResults) {
-			endIdx = len(m.contentSearchResults)
-		}
+	dialog := title + "\n" + content + "\n" + prompt
+	rendered := dialogStyle.Render(dialog)
 
-		for i := startIdx; i < endIdx; i++ {
-			result := m.contentSearchResults[i]
-			cursor := "  "
-			if i == m.contentSearchCursor {
-				cursor = "▶ "
-			}
+	// Center the dialog
+	verticalPadding := (m.height - dialogHeight) / 2
+	horizontalPadding := (m.width - dialogWidth) / 2
 
-			line := fmt.Sprintf("%s%s:%d:%d - %s",
-				cursor,
-				filepath.Base(result.file),
-				result.line,
-				result.column,
-				strings.TrimSpace(result.content))
+	centeredStyle := lipgloss.NewStyle().
+		Padding(verticalPadding, horizontalPadding)
 
-			// Truncate if too long
-			maxLen := m.width - 8
-			if len(line) > maxLen {
-				line = line[:maxLen-3] + "..."
-			}
-
-			if i == m.contentSearchCursor {
-				selectedStyle := lipgloss.NewStyle().
-					Background(lipgloss.Color("57")).
-					Foreground(lipgloss.Color("230")).
-					Width(m.width - 6)
-				line = selectedStyle.Render(line)
-			}
-
-			content = append(content, line)
-		}
-	}
-
-	return searchStyle.Render(strings.Join(content, "\n"))
+	return centeredStyle.Render(rendered)
 }

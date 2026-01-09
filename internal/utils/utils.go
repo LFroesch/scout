@@ -14,7 +14,7 @@ func GetFileIcon(name string) string {
 	ext := strings.ToLower(filepath.Ext(name))
 
 	switch ext {
-	case ".go":
+	case ".go", ".mod", ".sum":
 		return "🐹"
 	case ".js", ".ts", ".jsx", ".tsx":
 		return "📜"
@@ -52,7 +52,7 @@ func GetFileIcon(name string) string {
 		return "📘"
 	case ".xls", ".xlsx":
 		return "📊"
-	case ".sh", ".bash", ".zsh":
+	case ".sh", ".bash", ".zsh", "install":
 		return "🖥️"
 	case ".git", ".gitignore":
 		return "🔀"
