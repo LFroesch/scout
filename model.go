@@ -33,10 +33,10 @@ const (
 	modeCreateFile
 	modeCreateDir
 	modeCommand
-	modeSortMenu
 	modeConfirmFileDelete
 	modeGitCommit
 	modeHelp
+	modeErrorDialog
 )
 
 type sortMode int
@@ -64,12 +64,13 @@ const (
 )
 
 type fileItem struct {
-	path     string
-	name     string
-	isDir    bool
-	size     int64
-	modTime  time.Time
-	selected bool
+	path      string
+	name      string
+	isDir     bool
+	size      int64
+	modTime   time.Time
+	isSymlink bool
+	linkTarget string
 }
 
 // Config type is now in internal/config package
@@ -107,14 +108,12 @@ type model struct {
 	clipboard           []string      // Files in clipboard
 	clipboardOp         operationType // Copy or cut
 	sortBy              sortMode      // Current sort mode
-	sortMenuCursor      int           // Cursor in sort menu
 	dualPane            bool          // Dual pane mode enabled
 	activePane          int           // 0 = left, 1 = right
 	rightDir            string        // Right pane directory
 	rightFiles          []fileItem    // Right pane files
 	rightCursor         int           // Right pane cursor
 	rightScrollOffset   int           // Right pane scroll offset
-	permissions         bool          // Show permissions
 	contentSearchResults []contentSearchResult // Ripgrep search results
 	contentSearchCursor int           // Cursor in content search results
 	previewPending      bool          // Preview update pending
@@ -122,6 +121,17 @@ type model struct {
 	lastCursorMove      time.Time     // Last time cursor moved
 	scrollingFast       bool          // Currently in fast scroll mode
 	helpScroll          int           // Help screen scroll position
+	errorMsg            string        // Error dialog message
+	errorDetails        string        // Detailed error info
+	undoStack           []undoItem    // Undo history
+	visitedDirs         map[string]bool // Track visited dirs for symlink loop detection
+}
+
+type undoItem struct {
+	operation   string // "delete"
+	path        string // Original path
+	wasDir      bool   // Was it a directory?
+	trashPath   string // Path in trash (if applicable)
 }
 
 type contentSearchResult struct {
@@ -176,14 +186,13 @@ func initialModel() model {
 		clipboard:         []string{},
 		clipboardOp:       opNone,
 		sortBy:            sortByName,
-		sortMenuCursor:    0,
 		dualPane:          false,
 		activePane:        0,
 		rightDir:          currentDir,
 		rightFiles:        []fileItem{},
 		rightCursor:       0,
 		rightScrollOffset: 0,
-		permissions:       false,
+		visitedDirs:       make(map[string]bool),
 	}
 
 	m.loadFiles()
@@ -193,8 +202,7 @@ func initialModel() model {
 func (m *model) loadFiles() {
 	entries, err := os.ReadDir(m.currentDir)
 	if err != nil {
-		m.statusMsg = fmt.Sprintf("Error reading directory: %v", err)
-		m.statusExpiry = time.Now().Add(3 * time.Second)
+		m.showError("Cannot Read Directory", fmt.Sprintf("Failed to read %s: %v", filepath.Base(m.currentDir), err))
 		return
 	}
 
@@ -221,17 +229,56 @@ func (m *model) loadFiles() {
 			continue
 		}
 
-		info, err := entry.Info()
+		itemPath := filepath.Join(m.currentDir, entry.Name())
+
+		// Use Lstat to get symlink info without following it
+		linfo, err := os.Lstat(itemPath)
 		if err != nil {
 			continue
 		}
 
+		// Check if it's a symlink
+		var isSymlink bool
+		var linkTarget string
+		var actualIsDir bool
+		var actualSize int64
+		var actualModTime time.Time
+
+		if linfo.Mode()&os.ModeSymlink != 0 {
+			isSymlink = true
+			if target, err := os.Readlink(itemPath); err == nil {
+				// Make absolute if relative
+				if !filepath.IsAbs(target) {
+					linkTarget = filepath.Join(m.currentDir, target)
+				} else {
+					linkTarget = target
+				}
+			}
+			// Try to stat the target to get actual properties
+			if targetInfo, err := os.Stat(itemPath); err == nil {
+				actualIsDir = targetInfo.IsDir()
+				actualSize = targetInfo.Size()
+				actualModTime = targetInfo.ModTime()
+			} else {
+				// Broken symlink - use link info
+				actualIsDir = false
+				actualSize = linfo.Size()
+				actualModTime = linfo.ModTime()
+			}
+		} else {
+			actualIsDir = linfo.IsDir()
+			actualSize = linfo.Size()
+			actualModTime = linfo.ModTime()
+		}
+
 		item := fileItem{
-			path:    filepath.Join(m.currentDir, entry.Name()),
-			name:    entry.Name(),
-			isDir:   entry.IsDir(),
-			size:    info.Size(),
-			modTime: info.ModTime(),
+			path:       itemPath,
+			name:       entry.Name(),
+			isDir:      actualIsDir,
+			size:       actualSize,
+			modTime:    actualModTime,
+			isSymlink:  isSymlink,
+			linkTarget: linkTarget,
 		}
 
 		m.files = append(m.files, item)
@@ -281,19 +328,6 @@ func (m *model) sortFiles() {
 	})
 }
 
-func (m *model) deleteSelectedFile() error {
-	if len(m.filteredFiles) == 0 || m.cursor >= len(m.filteredFiles) {
-		return fmt.Errorf("no file selected")
-	}
-
-	selected := m.filteredFiles[m.cursor]
-	if selected.name == ".." {
-		return fmt.Errorf("cannot delete parent directory")
-	}
-
-	return fileops.Delete(selected.path, selected.isDir)
-}
-
 func (m *model) renameFile(oldPath, newName string) error {
 	return fileops.Rename(oldPath, newName)
 }
@@ -314,39 +348,17 @@ func (m *model) cutFiles() error {
 	return fileops.MoveMultiple(m.clipboard, m.currentDir)
 }
 
-func (m *model) toggleSelection() {
-	if len(m.filteredFiles) == 0 || m.cursor >= len(m.filteredFiles) {
-		return
-	}
-
-	selected := &m.filteredFiles[m.cursor]
-	selected.selected = !selected.selected
-
-	// Also update in main files list
-	for i := range m.files {
-		if m.files[i].path == selected.path {
-			m.files[i].selected = selected.selected
-			break
-		}
-	}
+func (m *model) showError(title string, details string) {
+	m.errorMsg = title
+	m.errorDetails = details
+	m.mode = modeErrorDialog
 }
 
-func (m *model) getSelectedFiles() []string {
-	var selected []string
-	for _, file := range m.files {
-		if file.selected && file.name != ".." {
-			selected = append(selected, file.path)
-		}
-	}
-	return selected
-}
-
-func (m *model) clearSelections() {
-	for i := range m.files {
-		m.files[i].selected = false
-	}
-	for i := range m.filteredFiles {
-		m.filteredFiles[i].selected = false
+func (m *model) addToUndo(item undoItem) {
+	m.undoStack = append(m.undoStack, item)
+	// Keep only last 10 items
+	if len(m.undoStack) > 10 {
+		m.undoStack = m.undoStack[1:]
 	}
 }
 

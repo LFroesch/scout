@@ -6,17 +6,18 @@ A lightning-fast TUI file explorer and fuzzy finder for developers. Navigate, se
 
 ### Core File Management
 - **📁 Full File Operations** - Delete, rename, create files/directories with confirmation dialogs
-- **✂️ Copy/Cut/Paste** - Clipboard operations for files and directories (c, x, P)
-- **☑️ Bulk Selection** - Select multiple files with space, operate on all at once
+- **✂️ Copy/Cut/Paste** - Clipboard operations for files and directories (c, x, p)
+- **🔄 Undo** - Restore last deleted file from trash (press u)
 - **🗑️ Safe Deletion** - Move to trash when possible, with confirmation dialogs
-- **📊 Smart Sorting** - Sort by name, size, date, or type (press S)
-- **📐 File Info Display** - Shows file sizes, selection checkboxes, and git status
+- **📊 Smart Sorting** - Cycle through sort modes: Name, Size, Date, Type (press s)
+- **📐 File Info Display** - Shows file sizes, git status, and symlink indicators
 
 ### Advanced Search
 - **⚡ Advanced Fuzzy Search** - Lightning-fast fuzzy matching with result highlighting
-- **🔄 Recursive Search** - Search across entire project tree (toggle with Ctrl+R in search mode)
+- **🔄 Recursive Search** - Search across entire project tree (toggle with Tab in search mode)
 - **🔍 Content Search** - Search inside files with ripgrep integration (Ctrl+G)
 - **🎨 Search Highlighting** - Matched characters highlighted in search results
+- **⌨️ Intuitive Navigation** - Arrow keys to navigate results, ESC clears then exits
 
 ### Git Integration
 - **🔀 Enhanced Git Status** - Shows modified files and current branch in your repository
@@ -100,28 +101,29 @@ scout /path/to/directory
 - **`~`** - Go to home directory
 
 ### Search & Filter
-- **`/`** - Enter fuzzy search mode (filename search)
-- **`ctrl+r`** - Toggle recursive search (in search mode)
-- **`ctrl+g`** - Content search (search inside files with ripgrep)
-- **`esc`** - Exit search mode
-- **Type** - Fuzzy filter files with intelligent matching and highlighting
+- **`/`** - Enter search mode (starts with current directory file search)
+- **`Tab`** - Cycle search modes (Current Dir → Recursive → Content Search)
+- **`↑/↓`** - Navigate search results (while in search mode)
+- **`esc`** - Clear search input first, then exit search mode
+- **`S`** - Cycle sort mode (Name → Size → Date → Type)
+- **`.`** - Toggle hidden files
 
 ### File Operations
 - **`e`** - Edit file in default editor
 - **`o`** - Open file/directory (files: default app, directories: VS Code workspace)
 - **`y`** - Copy file path to clipboard
 - **`D`** - Delete file/directory (with confirmation)
+- **`u`** - Undo last deletion (restore from trash)
 - **`R`** - Rename file/directory
 - **`N`** - Create new file
 - **`M`** - Create new directory
-- **`c`** - Copy selected files to clipboard
-- **`x`** - Cut selected files to clipboard
-- **`P`** - Paste files from clipboard
-- **`space`** - Toggle selection (for bulk operations)
+- **`c`** - Copy current file to clipboard
+- **`x`** - Cut current file to clipboard
+- **`p`** - Paste file from clipboard
 
 ### Sorting & Display
-- **`S`** - Open sort menu (sort by name/size/date/type)
-- **`I`** - Toggle permissions display
+- **`S`** - Cycle sort mode (Name → Size → Date → Type)
+- **`r`** - Refresh current directory
 
 ### Bookmarks
 - **`b`** - Open bookmarks view
@@ -134,10 +136,8 @@ scout /path/to/directory
   - **`esc`** - Exit bookmarks view
 
 ### View Options
-- **`H`** - Toggle hidden files
-- **`p`** - Toggle preview pane
-- **`r`** - Refresh current directory
-- **`w/s`** - Scroll preview up/down (also works with alt+up/down)
+- **`.`** - Toggle hidden files
+- **`alt+up/alt+down`** - Scroll preview up/down
 
 ### General
 - **`?`** - Show help screen with all keyboard shortcuts
@@ -257,101 +257,25 @@ Scout is designed to be fast:
 
 ## Examples
 
-### Quick File Navigation
-```
-1. Launch Scout: `scout`
-2. Press `/` to search
-3. Type "main.go"
-4. Press `enter` to open
-```
+### Workflow Examples
 
-### Recursive Project Search
-```
-1. Launch Scout in your project root
-2. Press `/` to enter search mode
-3. Press `ctrl+r` to enable recursive search
-4. Type a few characters from the filename
-5. See results from entire project tree with highlighted matches
-6. Navigate and open any file instantly
-```
+**Recursive Project Search:**
+Launch Scout → `/` to search → `Tab` for recursive mode → type filename → `↑/↓` to navigate → `enter` to open
 
-### Content Search (Search Inside Files)
-```
-1. Launch Scout in your project root
-2. Press `ctrl+g` for content search
-3. Type your search query (e.g., "func main")
-4. Press `enter` to search with ripgrep
-5. Navigate results with `j/k`
-6. Press `o` to open file at the matching line
-7. Press `esc` to close search
-```
+**Content Search (grep):**
+`/` → `Tab` twice for content search → type query (e.g., "func main") → `↑/↓` navigate → `o` to open at line
 
-### File Management Operations
-```
-# Delete files
-1. Navigate to file with `j/k`
-2. Press `D` to delete
-3. Confirm with `y`
+**File Operations:**
+Copy workflow: `c` to copy → navigate to destination → `p` to paste
+Delete with undo: `D` to delete → `y` confirm → `u` to undo if needed
 
-# Rename files
-1. Navigate to file
-2. Press `R` to rename
-3. Edit the name and press `enter`
-
-# Copy/Paste workflow
-1. Navigate to files you want to copy
-2. Press `space` to select multiple files (or just one)
-3. Press `c` to copy (or `x` to cut)
-4. Navigate to destination directory
-5. Press `P` to paste
-
-# Create new files/directories
-1. Press `N` to create a new file
-2. Press `M` to create a new directory
-3. Type the name and press `enter`
-```
-
-### Sorting Files
-```
-1. Press `S` to open sort menu
-2. Use `j/k` to select sort mode:
-   - Name (default)
-   - Size (find largest files)
-   - Date (find newest files)
-   - Type (group by extension)
-3. Press `enter` to apply
-```
-
-### Smart Bookmark Workflow
-```
-1. Navigate to interesting directory
-2. Press `B` to bookmark it
-3. Visit your bookmarked directories frequently
-4. Press `b` to view bookmarks - sorted by visit frequency
-5. Most visited directories appear at the top
-6. Navigate with `j/k`, press `enter` to go
-7. Press `o` to open in VS Code
-8. Press `d` to delete (with confirmation)
-```
-
-### VS Code Integration
-```
-1. Navigate to a directory/file
-2. Press `o` to open as VS Code workspace
-3. Works from both file view and bookmarks view
-```
-
-### Copy File Paths
-```
-1. Navigate to file
-2. Press `y` to copy path
-3. Path is now in clipboard (works on all platforms)
-```
+**Smart Bookmarks:**
+`B` to bookmark current dir → `b` to view bookmarks (sorted by frecency) → `enter` to navigate or `o` for VS Code
 
 ## Requirements
 
 ### Optional Dependencies
-- **ripgrep (rg)** - Required for content search feature (`ctrl+g`). Install with:
+- **ripgrep (rg)** - Required for content search feature (accessible via `/` then `Tab` twice). Install with:
   ```bash
   # Ubuntu/Debian
   sudo apt install ripgrep
@@ -374,18 +298,9 @@ Scout is designed to be fast:
 
 ## Tips
 
-- **Root boundary**: Configure `root_path` to prevent accidentally navigating above your work directory
-- **Content search**: Install ripgrep (`rg`) for powerful content search - find text inside files instantly
-- **Safe deletion**: Install `gio` or `trash-put` to move deleted files to trash instead of permanent deletion
-- **Git awareness**: Modified files show [M] marker and current branch displays in header
-- **Recursive search**: Use `ctrl+r` in search mode to search your entire project - perfect for finding files deep in the tree
-- **Fast navigation**: Use `ctrl+d`/`ctrl+u` for half-page jumps, `ctrl+f`/`ctrl+b` for full-page
-- **Frecency magic**: The more you use Scout, the smarter your bookmarks become - most-used directories rise to the top
-- **Quick navigation**: Use `g`/`G` to jump to top/bottom of file lists
-- **Space optimization**: Hide preview with `p` for more file list space in narrow terminals
-- **Bookmark workflow**: Bookmark project roots, then use `b` → `o` for instant VS Code access
-- **Custom editor**: Set your preferred editor in config with `"editor": "nvim"` (or vim, nano, etc.)
-- **Search highlighting**: Matched characters are highlighted in yellow - helps you understand why results matched
-- **Sorting**: Press `S` to sort by size (find largest files) or date (find newest files)
-- **Status bar**: Watch the status bar for file info, git branch, and keyboard shortcuts
-- **Git awareness**: Current branch shows in header - always know which branch you're working on
+- **Content search**: Install ripgrep (`rg`) for content search feature (search text inside files)
+- **Safe deletion**: Install `gio` or `trash-put` for trash support - enables undo with `u` key
+- **Frecency magic**: Bookmarks auto-sort by usage frequency - most-visited directories appear first
+- **Custom editor**: Set preferred editor in config: `"editor": "nvim"` (used for `e` key)
+- **Root boundary**: Configure `root_path` to limit navigation above your work directory
+- **Mouse support**: Click to select files, scroll with mouse wheel in all views

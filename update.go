@@ -11,12 +11,16 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/LFroesch/scout/internal/config"
+	"github.com/LFroesch/scout/internal/fileops"
 	"github.com/LFroesch/scout/internal/git"
 	"github.com/LFroesch/scout/internal/utils"
 )
 
 func (m *model) Init() tea.Cmd {
-	return tea.SetWindowTitle("🔍 Scout - File Explorer")
+	return tea.Batch(
+		tea.SetWindowTitle("🔍 Scout - File Explorer"),
+		tea.EnableMouseAllMotion,
+	)
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -82,8 +86,150 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseMsg:
+		// Handle mouse wheel scroll
+		if msg.Action == tea.MouseActionPress && (msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
+			switch m.mode {
+			case modeNormal:
+				// Scroll in file list
+				if msg.Button == tea.MouseButtonWheelUp {
+					if m.cursor > 0 {
+						m.cursor--
+						m.updatePreview()
+					}
+				} else {
+					if m.cursor < len(m.filteredFiles)-1 {
+						m.cursor++
+						m.updatePreview()
+					}
+				}
+				return m, nil
+
+			case modeHelp:
+				// Scroll in help page
+				if msg.Button == tea.MouseButtonWheelUp {
+					if m.helpScroll > 0 {
+						m.helpScroll--
+					}
+				} else {
+					m.helpScroll++
+				}
+				return m, nil
+
+			case modeBookmarks:
+				// Scroll in bookmarks
+				if msg.Button == tea.MouseButtonWheelUp {
+					if m.bookmarksCursor > 0 {
+						m.bookmarksCursor--
+					}
+				} else {
+					if m.bookmarksCursor < len(m.sortedBookmarkPaths)-1 {
+						m.bookmarksCursor++
+					}
+				}
+				return m, nil
+			}
+		}
+
+		// Handle mouse click
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+			switch m.mode {
+			case modeNormal:
+				// Mouse click in file list area
+				if len(m.filteredFiles) > 0 {
+					clickY := msg.Y - 3 // Adjust for header
+					if clickY >= 0 && clickY < len(m.filteredFiles)-m.scrollOffset {
+						newCursor := m.scrollOffset + clickY
+						if newCursor >= 0 && newCursor < len(m.filteredFiles) {
+							return m, m.moveCursor(newCursor)
+						}
+					}
+				}
+
+			case modeBookmarks:
+				// Click in bookmarks list with scroll support
+				if len(m.sortedBookmarkPaths) > 0 {
+					// Calculate scroll offset (same logic as renderBookmarksView)
+					availableHeight := m.height - 9
+					if availableHeight < 3 {
+						availableHeight = 3
+					}
+					contentHeight := availableHeight - 2
+					if contentHeight < 1 {
+						contentHeight = 1
+					}
+
+					maxItems := contentHeight
+					scrollOffset := 0
+					if m.bookmarksCursor >= maxItems {
+						scrollOffset = m.bookmarksCursor - maxItems + 1
+					}
+
+					hasTopIndicator := scrollOffset > 0
+					hasBottomIndicator := scrollOffset+maxItems < len(m.sortedBookmarkPaths)
+
+					// Adjust for indicators
+					actualMaxItems := maxItems
+					if hasTopIndicator {
+						actualMaxItems--
+					}
+					if hasBottomIndicator {
+						actualMaxItems--
+					}
+
+					// Recalculate scroll offset
+					if m.bookmarksCursor >= scrollOffset+actualMaxItems {
+						scrollOffset = m.bookmarksCursor - actualMaxItems + 1
+					}
+					if m.bookmarksCursor < scrollOffset {
+						scrollOffset = m.bookmarksCursor
+					}
+
+					hasTopIndicator = scrollOffset > 0
+
+					// Account for: app header (1) + border (1) + bookmarks title (1) = 3
+					clickY := msg.Y - 3
+
+					// Adjust for top scroll indicator (shifts content down by 1)
+					if hasTopIndicator {
+						clickY--
+					}
+
+					// Calculate actual bookmark index
+					if clickY >= 0 {
+						newCursor := scrollOffset + clickY
+						if newCursor >= 0 && newCursor < len(m.sortedBookmarkPaths) {
+							m.bookmarksCursor = newCursor
+							// Navigate to bookmark (same as enter key)
+							targetPath := m.sortedBookmarkPaths[m.bookmarksCursor]
+							if m.config.RootPath == "" || strings.HasPrefix(targetPath, m.config.RootPath) {
+								m.addToHistory(targetPath)
+								m.currentDir = targetPath
+								m.cursor = 0
+								m.scrollOffset = 0
+								m.previewScroll = 0
+								m.mode = modeNormal
+								m.loadFiles()
+								m.gitModified = git.GetModifiedFiles(m.currentDir)
+								m.gitBranch = git.GetBranch(m.currentDir)
+								m.updatePreview()
+								// Save config immediately after bookmark navigation to persist frecency
+								config.Save(m.config)
+								return m, nil
+							}
+						}
+					}
+				}
+			}
+		}
+
 	case tea.KeyMsg:
 		switch m.mode {
+		case modeErrorDialog:
+			// Any key dismisses error dialog
+			m.mode = modeNormal
+			return m, nil
+
 		case modeBookmarks:
 			switch msg.String() {
 			case "esc", "q":
@@ -111,6 +257,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.loadFiles()
 						m.gitModified = git.GetModifiedFiles(m.currentDir)
 						m.gitBranch = git.GetBranch(m.currentDir)
+						// Save config immediately after bookmark navigation to persist frecency
+						config.Save(m.config)
 					}
 				}
 				return m, nil
@@ -168,13 +316,31 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "y", "Y":
 				// Confirmed - delete the file
-				if err := m.deleteSelectedFile(); err != nil {
-					m.statusMsg = fmt.Sprintf("Error deleting: %v", err)
-					m.statusExpiry = time.Now().Add(3 * time.Second)
-				} else {
-					m.statusMsg = "File deleted"
-					m.statusExpiry = time.Now().Add(2 * time.Second)
-					m.loadFiles()
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					selected := m.filteredFiles[m.cursor]
+					if selected.name == ".." {
+						m.mode = modeNormal
+						return m, nil
+					}
+
+					// Add to undo stack before deleting
+					undoEntry := undoItem{
+						operation: "delete",
+						path:      selected.path,
+						wasDir:    selected.isDir,
+					}
+
+					// Try to move to trash (which we can potentially restore)
+					trashPath, err := fileops.DeleteWithUndo(selected.path, selected.isDir)
+					if err != nil {
+						m.showError("Delete Failed", err.Error())
+					} else {
+						undoEntry.trashPath = trashPath
+						m.addToUndo(undoEntry)
+						m.statusMsg = fmt.Sprintf("Deleted: %s (press 'u' to undo)", selected.name)
+						m.statusExpiry = time.Now().Add(3 * time.Second)
+						m.loadFiles()
+					}
 				}
 				m.mode = modeNormal
 				return m, nil
@@ -195,8 +361,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if newName != "" && len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 					selected := m.filteredFiles[m.cursor]
 					if err := m.renameFile(selected.path, newName); err != nil {
-						m.statusMsg = fmt.Sprintf("Error renaming: %v", err)
-						m.statusExpiry = time.Now().Add(3 * time.Second)
+						m.showError("Rename Failed", err.Error())
 					} else {
 						m.statusMsg = fmt.Sprintf("Renamed to: %s", newName)
 						m.statusExpiry = time.Now().Add(2 * time.Second)
@@ -221,8 +386,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				name := m.textInput.Value()
 				if name != "" {
 					if err := m.createFile(name); err != nil {
-						m.statusMsg = fmt.Sprintf("Error creating file: %v", err)
-						m.statusExpiry = time.Now().Add(3 * time.Second)
+						m.showError("Create File Failed", err.Error())
 					} else {
 						m.statusMsg = fmt.Sprintf("Created file: %s", name)
 						m.statusExpiry = time.Now().Add(2 * time.Second)
@@ -247,8 +411,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				name := m.textInput.Value()
 				if name != "" {
 					if err := m.createDir(name); err != nil {
-						m.statusMsg = fmt.Sprintf("Error creating directory: %v", err)
-						m.statusExpiry = time.Now().Add(3 * time.Second)
+						m.showError("Create Directory Failed", err.Error())
 					} else {
 						m.statusMsg = fmt.Sprintf("Created directory: %s", name)
 						m.statusExpiry = time.Now().Add(2 * time.Second)
@@ -263,34 +426,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 
-		case modeSortMenu:
-			switch msg.String() {
-			case "esc", "q":
-				m.mode = modeNormal
-				return m, nil
-			case "j", "down":
-				if m.sortMenuCursor < 3 {
-					m.sortMenuCursor++
-				}
-			case "k", "up":
-				if m.sortMenuCursor > 0 {
-					m.sortMenuCursor--
-				}
-			case "enter":
-				m.sortBy = sortMode(m.sortMenuCursor)
-				m.sortFiles()
-				m.filteredFiles = m.files
-				m.mode = modeNormal
-				sortNames := []string{"Name", "Size", "Date", "Type"}
-				m.statusMsg = fmt.Sprintf("Sorted by: %s", sortNames[m.sortBy])
-				m.statusExpiry = time.Now().Add(2 * time.Second)
-				return m, nil
-			}
-			return m, nil
-
 		case modeHelp:
 			switch msg.String() {
-			case "esc", "q", "?":
+			case "esc", "?":
 				m.mode = modeNormal
 				m.helpScroll = 0
 				return m, nil
@@ -311,30 +449,67 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeSearch:
 			switch msg.String() {
 			case "esc":
-				m.mode = modeNormal
-				m.searchInput.SetValue("")
-				m.filteredFiles = m.files
-				m.searchMatches = [][]int{}
-				m.recursiveSearch = false
-				m.loading = false
-				m.updatePreview()
+				// First ESC clears input, second ESC exits search
+				if m.searchInput.Value() != "" {
+					m.searchInput.SetValue("")
+					m.filteredFiles = m.files
+					m.searchMatches = [][]int{}
+					m.updatePreview()
+				} else {
+					m.mode = modeNormal
+					m.recursiveSearch = false
+					m.currentSearchType = searchFilename
+					m.loading = false
+				}
 				return m, nil
+
 			case "enter":
 				m.mode = modeNormal
 				m.loading = false
 				return m, nil
-			case "ctrl+r":
-				// Toggle recursive search
-				m.recursiveSearch = !m.recursiveSearch
-				m.updateFilter()
-				m.updatePreview()
-				if m.recursiveSearch {
-					m.statusMsg = "Recursive search enabled"
+
+			case "tab":
+				// Cycle through search modes: Current Dir -> Recursive -> Content -> Current Dir
+				if m.currentSearchType == searchFilename && !m.recursiveSearch {
+					// Mode 1 -> Mode 2: Current Dir Filename -> Recursive Filename
+					m.recursiveSearch = true
+					m.statusMsg = "Recursive file search"
+				} else if m.currentSearchType == searchFilename && m.recursiveSearch {
+					// Mode 2 -> Mode 3: Recursive Filename -> Content Search
+					m.currentSearchType = searchContent
+					m.recursiveSearch = true
+					m.statusMsg = "Content search (recursive)"
 				} else {
-					m.statusMsg = "Current directory search"
+					// Mode 3 -> Mode 1: Content Search -> Current Dir Filename
+					m.currentSearchType = searchFilename
+					m.recursiveSearch = false
+					m.statusMsg = "Current directory file search"
 				}
 				m.statusExpiry = time.Now().Add(2 * time.Second)
+				m.updateFilter()
+				m.updatePreview()
 				return m, nil
+
+			case "up", "down":
+				// Navigate through filtered results
+				if msg.String() == "up" {
+					if m.cursor > 0 {
+						m.cursor--
+						m.updatePreview()
+					}
+				} else {
+					if m.cursor < len(m.filteredFiles)-1 {
+						m.cursor++
+						m.updatePreview()
+					}
+				}
+				return m, nil
+
+			case "left", "right":
+				// Move cursor in text input
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				return m, cmd
+
 			default:
 				// Pass all other keys to search input for typing
 				m.searchInput, cmd = m.searchInput.Update(msg)
@@ -361,7 +536,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			switch keyStr {
-			case "q", "ctrl+c":
+			case "ctrl+c", "q":
 				return m, tea.Quit
 
 			case "j", "down":
@@ -428,6 +603,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, m.moveCursor(newPos)
 
+			case "w", "alt+up":
+				// Scroll preview up
+				if m.showPreview && m.previewScroll > 0 {
+					m.previewScroll--
+				}
+
 			case "s", "alt+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
@@ -435,19 +616,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if availableHeight < 3 {
 						availableHeight = 3
 					}
-					contentHeight := availableHeight - 2 // Reserve space for scroll indicators
+					contentHeight := availableHeight - 2
 					if contentHeight < 1 {
 						contentHeight = 1
 					}
 					if m.previewScroll < len(m.previewLines)-contentHeight {
 						m.previewScroll++
 					}
-				}
-
-			case "w", "alt+up":
-				// Scroll preview up
-				if m.showPreview && m.previewScroll > 0 {
-					m.previewScroll--
 				}
 
 			case "g":
@@ -511,8 +686,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "/":
 				m.mode = modeSearch
 				m.currentSearchType = searchFilename
+				m.recursiveSearch = false // Always start in current directory mode
 				m.searchInput.SetValue("")
-				m.searchInput.Placeholder = "Search filenames..."
+				m.searchInput.Placeholder = "Search..."
 				m.searchInput.Focus()
 				return m, textinput.Blink
 
@@ -656,37 +832,27 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 
 			case "c":
-				// Copy - add selected files to clipboard
-				selected := m.getSelectedFiles()
-				if len(selected) == 0 && len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
-					// If nothing selected, copy current file
+				// Copy current file to clipboard
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 					current := m.filteredFiles[m.cursor]
 					if current.name != ".." {
-						selected = []string{current.path}
+						m.clipboard = []string{current.path}
+						m.clipboardOp = opCopy
+						m.statusMsg = fmt.Sprintf("Copied: %s", current.name)
+						m.statusExpiry = time.Now().Add(2 * time.Second)
 					}
-				}
-				if len(selected) > 0 {
-					m.clipboard = selected
-					m.clipboardOp = opCopy
-					m.statusMsg = fmt.Sprintf("Copied %d item(s)", len(selected))
-					m.statusExpiry = time.Now().Add(2 * time.Second)
 				}
 
 			case "x":
-				// Cut - add selected files to clipboard
-				selected := m.getSelectedFiles()
-				if len(selected) == 0 && len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
-					// If nothing selected, cut current file
+				// Cut current file to clipboard
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 					current := m.filteredFiles[m.cursor]
 					if current.name != ".." {
-						selected = []string{current.path}
+						m.clipboard = []string{current.path}
+						m.clipboardOp = opCut
+						m.statusMsg = fmt.Sprintf("Cut: %s", current.name)
+						m.statusExpiry = time.Now().Add(2 * time.Second)
 					}
-				}
-				if len(selected) > 0 {
-					m.clipboard = selected
-					m.clipboardOp = opCut
-					m.statusMsg = fmt.Sprintf("Cut %d item(s)", len(selected))
-					m.statusExpiry = time.Now().Add(2 * time.Second)
 				}
 
 			case "p":
@@ -703,8 +869,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 					if err != nil {
-						m.statusMsg = fmt.Sprintf("Error pasting: %v", err)
-						m.statusExpiry = time.Now().Add(3 * time.Second)
+						m.showError("Paste Failed", err.Error())
 					} else {
 						m.statusMsg = "Pasted successfully"
 						m.statusExpiry = time.Now().Add(2 * time.Second)
@@ -712,32 +877,35 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-			case " ":
-				// Toggle selection
-				m.toggleSelection()
-				// Move cursor down
-				if m.cursor < len(m.filteredFiles)-1 {
-					m.cursor++
-					m.updatePreview()
+			case "u":
+				// Undo last deletion
+				if len(m.undoStack) > 0 {
+					lastUndo := m.undoStack[len(m.undoStack)-1]
+					m.undoStack = m.undoStack[:len(m.undoStack)-1]
+
+					if lastUndo.operation == "delete" && lastUndo.trashPath != "" {
+						// Try to restore from trash
+						if err := fileops.RestoreFromTrash(lastUndo.trashPath, lastUndo.path); err != nil {
+							m.showError("Undo Failed", fmt.Sprintf("Could not restore %s: %v", filepath.Base(lastUndo.path), err))
+						} else {
+							m.statusMsg = fmt.Sprintf("Restored: %s", filepath.Base(lastUndo.path))
+							m.statusExpiry = time.Now().Add(2 * time.Second)
+							m.loadFiles()
+						}
+					}
+				} else {
+					m.statusMsg = "Nothing to undo"
+					m.statusExpiry = time.Now().Add(2 * time.Second)
 				}
 
 			case "S":
-				// Open sort menu
-				m.mode = modeSortMenu
-				m.sortMenuCursor = int(m.sortBy)
+				// Cycle through sort modes: Name → Size → Date → Type → Name...
+				m.sortBy = (m.sortBy + 1) % 4
+				m.sortFiles()
 
 			case "?":
 				// Show help screen
 				m.mode = modeHelp
-
-			case "ctrl+g":
-				// Content search (ripgrep)
-				m.mode = modeSearch
-				m.currentSearchType = searchContent
-				m.searchInput.SetValue("")
-				m.searchInput.Placeholder = "Search file contents..."
-				m.searchInput.Focus()
-				return m, textinput.Blink
 			}
 		}
 	}
