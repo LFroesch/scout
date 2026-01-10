@@ -15,6 +15,18 @@ func (m *model) View() string {
 		return "Loading..."
 	}
 
+	// Show helpful message for very small terminals
+	if m.width < minTerminalWidth || m.height < minTerminalHeight {
+		warningStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")).
+			Bold(true).
+			Padding(1)
+		return warningStyle.Render(fmt.Sprintf(
+			"Terminal too small: %dx%d\nMinimum: %dx%d\n\nPlease resize terminal or zoom out",
+			m.width, m.height, minTerminalWidth, minTerminalHeight,
+		))
+	}
+
 	var content string
 
 	// Header
@@ -49,7 +61,7 @@ func (m *model) View() string {
 			mainContent = lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 		} else if m.showPreview {
 			// Split view with preview - ensure both panels have same height
-			availableHeight := m.height - 9
+			availableHeight := m.height - uiOverhead
 			if availableHeight < 3 {
 				availableHeight = 3
 			}
@@ -97,33 +109,51 @@ func (m model) renderHeader() string {
 		title = fmt.Sprintf("🔍 Scout - %s", m.currentDir)
 	}
 
+	// Show search query only when in search mode
 	if m.mode == modeSearch {
 		// Show search in top-right of header
 		var searchMode string
-		if m.currentSearchType == searchContent {
+		switch m.currentSearchType {
+		case searchUltra:
+			searchMode = "ULTRA SEARCH"
+		case searchContent:
 			searchMode = "CONTENT SEARCH"
-		} else if m.recursiveSearch {
+		case searchRecursive:
 			searchMode = "RECURSIVE SEARCH"
-		} else {
+		case searchFilename:
+			if m.recursiveSearch {
+				searchMode = "RECURSIVE SEARCH"
+			} else {
+				searchMode = "FILE SEARCH"
+			}
+		default:
 			searchMode = "FILE SEARCH"
 		}
 
 		// Build search parts with different colors
 		purpleStyle := lipgloss.NewStyle().
+			Bold(true).
 			Background(lipgloss.Color("235")).
 			Foreground(lipgloss.Color("105"))
 
 		grayStyle := lipgloss.NewStyle().
+			Bold(true).
 			Background(lipgloss.Color("235")).
 			Foreground(lipgloss.Color("252"))
 
 		yellowStyle := lipgloss.NewStyle().
+			Bold(true).
 			Background(lipgloss.Color("235")).
 			Foreground(lipgloss.Color("226"))
 
 		searchLabel := fmt.Sprintf("🔍 %s: ", searchMode)
 		searchValue := m.searchInput.Value()
-		hint := " (Tab: cycle modes | ESC: clear/exit)"
+		var hint string
+		if m.searchResultsLocked {
+			hint = " [LOCKED] (Enter: open folder | ESC: exit | /: new search)"
+		} else {
+			hint = " (Tab: cycle modes | ESC: clear/exit | Enter: lock results)"
+		}
 
 		// Show cursor in search with yellow color
 		cursorPos := m.searchInput.Position()
@@ -165,8 +195,9 @@ func (m model) renderHeader() string {
 
 		// Style the title part
 		baseStyle := lipgloss.NewStyle().
+			Bold(true).
 			Background(lipgloss.Color("235")).
-			Foreground(lipgloss.Color("252"))
+			Foreground(lipgloss.Color("99"))
 
 		titlePart := baseStyle.Width(titleWidth).Padding(0, 1).Render(title)
 		searchPart := searchText
@@ -177,7 +208,9 @@ func (m model) renderHeader() string {
 	// Return with full width background for search mode
 	if m.mode == modeSearch {
 		return lipgloss.NewStyle().
+			Bold(true).
 			Background(lipgloss.Color("235")).
+			Foreground(lipgloss.Color("99")).
 			Width(m.width).
 			Render(title)
 	}
@@ -229,11 +262,15 @@ func (m *model) renderStatusBar() string {
 
 		// Loading indicator
 		if m.loading {
-			statusText += " | Searching..."
+			if m.scannedFiles > 0 {
+				statusText += fmt.Sprintf(" | Searching... (%d files scanned)", m.scannedFiles)
+			} else {
+				statusText += " | Searching..."
+			}
 		}
 
-		// Status message (temporary)
-		if m.statusMsg != "" {
+		// Status message (temporary) - skip if loading is already showing
+		if m.statusMsg != "" && !m.loading {
 			statusText += " | " + m.statusMsg
 		}
 
@@ -263,7 +300,7 @@ func (m *model) renderStatusBar() string {
 // renderFileList renders the file list panel with the given width
 func (m *model) renderFileList(width int) string {
 	// Calculate available height for file list
-	availableHeight := m.height - 9 // Account for header, status, borders, padding
+	availableHeight := m.height - uiOverhead // Account for header, status, borders, padding
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
@@ -282,11 +319,20 @@ func (m *model) renderFileList(width int) string {
 
 	var searchModeIndicator string
 	if m.mode == modeSearch {
-		if m.currentSearchType == searchContent {
+		switch m.currentSearchType {
+		case searchUltra:
+			searchModeIndicator = " [ULTRA]"
+		case searchContent:
 			searchModeIndicator = " [CONTENT]"
-		} else if m.recursiveSearch {
+		case searchRecursive:
 			searchModeIndicator = " [RECURSIVE]"
-		} else {
+		case searchFilename:
+			if m.recursiveSearch {
+				searchModeIndicator = " [RECURSIVE]"
+			} else {
+				searchModeIndicator = " [CURRENT DIR]"
+			}
+		default:
 			searchModeIndicator = " [CURRENT DIR]"
 		}
 	}
@@ -379,19 +425,36 @@ func (m *model) renderFileList(width int) string {
 			displayName = utils.HighlightMatches(name, m.searchMatches[i])
 		}
 
-		// Add file size for files (right-aligned)
+		// Calculate total available width (accounting for borders and padding)
+		totalWidth := width - 4
+		if totalWidth < 20 {
+			totalWidth = 20 // Minimum usable width
+		}
+
+		// Add file size for files (right-aligned), but only if we have space
 		sizeStr := ""
 		sizeWidth := 0
-		if !item.isDir && item.name != ".." {
+		minSpaceNeeded := 30 // icon(2) + name(10) + gitStatus(8) + padding(10)
+		if !item.isDir && item.name != ".." && totalWidth > minSpaceNeeded {
 			sizeStr = utils.FormatFileSizeColored(item.size)
 			sizeWidth = lipgloss.Width(sizeStr)
 		}
 
 		// Calculate available width for filename
-		// Reserve space: icon(2) + gitStatus(4-8) + size(~10) + padding(8)
-		maxNameLen := width - 28
-		if maxNameLen < 10 {
-			maxNameLen = 10
+		// Reserve: icon(2) + space(1) + gitStatus(~8) + size(sizeWidth) + padding(~10)
+		reservedSpace := 2 + 1 + 8 + sizeWidth + 10
+		maxNameLen := totalWidth - reservedSpace
+		if maxNameLen < 8 {
+			maxNameLen = 8 // Absolute minimum for name
+			// In very small terminals, hide size to make room
+			if totalWidth < 30 {
+				sizeStr = ""
+				sizeWidth = 0
+				maxNameLen = totalWidth - 15 // Just icon + gitStatus + padding
+				if maxNameLen < 8 {
+					maxNameLen = 8
+				}
+			}
 		}
 
 		// Truncate name if needed
@@ -404,6 +467,10 @@ func (m *model) renderFileList(width int) string {
 				}
 				truncated += string(r)
 			}
+			if truncated == "" && len(runes) > 0 {
+				// Handle case where even first char doesn't fit
+				truncated = string(runes[0])
+			}
 			displayName = truncated + "..."
 		}
 
@@ -412,10 +479,14 @@ func (m *model) renderFileList(width int) string {
 		leftWidth := lipgloss.Width(leftSide)
 
 		// Calculate padding to push size to the right
-		totalWidth := width - 4 // Account for padding in style
 		padding := totalWidth - leftWidth - sizeWidth
 		if padding < 1 {
 			padding = 1
+		}
+		if padding > totalWidth {
+			// Overflow protection - just use minimum padding
+			padding = 1
+			sizeStr = "" // Hide size if we're overflowing
 		}
 
 		// Build the line with size right-aligned
@@ -458,7 +529,7 @@ func (m *model) renderFileList(width int) string {
 }
 
 func (m *model) renderPreview(width int) string {
-	availableHeight := m.height - 9
+	availableHeight := m.height - uiOverhead
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
@@ -532,7 +603,7 @@ func (m *model) renderPreview(width int) string {
 }
 
 func (m model) renderBookmarksView() string {
-	availableHeight := m.height - 9
+	availableHeight := m.height - uiOverhead
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
@@ -897,7 +968,7 @@ func (m model) renderCreateDirDialog() string {
 }
 
 func (m model) renderHelpView() string {
-	availableHeight := m.height - 9
+	availableHeight := m.height - uiOverhead
 	if availableHeight < 3 {
 		availableHeight = 3
 	}
@@ -996,6 +1067,7 @@ func (m model) renderHelpView() string {
 	// Other section
 	allHelpContent = append(allHelpContent, sectionStyle.Render("Other:"))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Show this help", keyStyle.Render("?")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Open config file", keyStyle.Render(",")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s   Quit", keyStyle.Render("q / ctrl+c")))
 
 	// Calculate visible range

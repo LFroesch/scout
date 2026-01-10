@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -20,6 +21,37 @@ import (
 )
 
 type previewUpdateMsg struct{}
+
+// Async search messages
+type searchDebounceMsg struct{ query string }
+type searchResultMsg struct {
+	files   []fileItem
+	matches [][]int
+}
+type searchPartialMsg struct {
+	count int    // Total files scanned so far
+	drive string // Current drive being searched (for ultra search)
+}
+type searchCompleteMsg struct{}
+type searchErrorMsg struct{ err error }
+
+// Terminal dimension constants
+const (
+	minTerminalWidth  = 60  // Minimum usable width
+	minTerminalHeight = 20  // Minimum usable height
+	uiOverhead        = 9   // Header (1) + status (1) + borders (4) + padding (3)
+)
+
+// Application behavior constants
+const (
+	maxPreviewItems      = 20                   // Maximum items to show in directory preview
+	maxHistoryEntries    = 100                  // Maximum navigation history entries
+	maxUndoStackSize     = 10                   // Maximum undo operations to remember
+	previewUpdateDelay   = 250 * time.Millisecond // Delay before updating preview after cursor move
+	searchDebounceDelay  = 300 * time.Millisecond // Delay before triggering search after typing
+	minSearchChars       = 2                    // Minimum characters before triggering expensive searches
+	configSaveInterval   = 10                   // Save config every N directory visits
+)
 
 type mode int
 
@@ -60,7 +92,9 @@ type searchType int
 
 const (
 	searchFilename searchType = iota
+	searchRecursive
 	searchContent
+	searchUltra // Search across all mounted drives
 )
 
 type fileItem struct {
@@ -125,6 +159,15 @@ type model struct {
 	errorDetails        string        // Detailed error info
 	undoStack           []undoItem    // Undo history
 	visitedDirs         map[string]bool // Track visited dirs for symlink loop detection
+	lastClickTime       time.Time     // Time of last mouse click
+	lastClickY          int           // Y position of last click
+	lastClickMode       mode          // Mode during last click
+	doubleClickThreshold time.Duration // Double-click time threshold (typically 300-500ms)
+	searchCancel        chan struct{} // Channel to cancel ongoing search
+	searchInProgress    bool          // Whether a search is currently running
+	scannedFiles        int           // Number of files scanned in current search
+	searchResultsLocked bool          // Whether search results are locked for navigation
+	searchResultChan    chan tea.Msg  // Channel for receiving search progress and results
 }
 
 type undoItem struct {
@@ -139,6 +182,30 @@ type contentSearchResult struct {
 	line    int
 	column  int
 	content string
+}
+
+// Helper methods for safe dimensions
+func (m *model) getSafeWidth() int {
+	if m.width < minTerminalWidth {
+		return minTerminalWidth
+	}
+	return m.width
+}
+
+func (m *model) getSafeHeight() int {
+	if m.height < minTerminalHeight {
+		return minTerminalHeight
+	}
+	return m.height
+}
+
+// getContentHeight returns available height for content (total - UI overhead)
+func (m *model) getContentHeight() int {
+	availableHeight := m.getSafeHeight() - uiOverhead
+	if availableHeight < 3 {
+		availableHeight = 3
+	}
+	return availableHeight
 }
 
 func initialModel() model {
@@ -193,6 +260,7 @@ func initialModel() model {
 		rightCursor:       0,
 		rightScrollOffset: 0,
 		visitedDirs:       make(map[string]bool),
+		doubleClickThreshold: 400 * time.Millisecond,
 	}
 
 	m.loadFiles()
@@ -328,6 +396,64 @@ func (m *model) sortFiles() {
 	})
 }
 
+func (m *model) sortSearchResults() {
+	// Create a helper struct to keep file and match info together
+	type fileMatchPair struct {
+		file    fileItem
+		matches []int
+	}
+
+	// Pair files with their matches
+	pairs := make([]fileMatchPair, len(m.filteredFiles))
+	for i := range m.filteredFiles {
+		pairs[i].file = m.filteredFiles[i]
+		if i < len(m.searchMatches) {
+			pairs[i].matches = m.searchMatches[i]
+		}
+	}
+
+	// Sort pairs based on sort mode
+	sort.Slice(pairs, func(i, j int) bool {
+		// Keep ".." at top always
+		if pairs[i].file.name == ".." {
+			return true
+		}
+		if pairs[j].file.name == ".." {
+			return false
+		}
+
+		// Directories first (except for size sort)
+		if m.sortBy != sortBySize && pairs[i].file.isDir != pairs[j].file.isDir {
+			return pairs[i].file.isDir
+		}
+
+		// Apply sort mode
+		switch m.sortBy {
+		case sortBySize:
+			return pairs[i].file.size > pairs[j].file.size
+		case sortByDate:
+			return pairs[i].file.modTime.After(pairs[j].file.modTime)
+		case sortByType:
+			extI := strings.ToLower(filepath.Ext(pairs[i].file.name))
+			extJ := strings.ToLower(filepath.Ext(pairs[j].file.name))
+			if extI != extJ {
+				return extI < extJ
+			}
+			return strings.ToLower(pairs[i].file.name) < strings.ToLower(pairs[j].file.name)
+		default: // sortByName
+			return strings.ToLower(pairs[i].file.name) < strings.ToLower(pairs[j].file.name)
+		}
+	})
+
+	// Unpack sorted pairs back into separate slices
+	m.filteredFiles = make([]fileItem, len(pairs))
+	m.searchMatches = make([][]int, len(pairs))
+	for i, pair := range pairs {
+		m.filteredFiles[i] = pair.file
+		m.searchMatches[i] = pair.matches
+	}
+}
+
 func (m *model) renameFile(oldPath, newName string) error {
 	return fileops.Rename(oldPath, newName)
 }
@@ -356,14 +482,18 @@ func (m *model) showError(title string, details string) {
 
 func (m *model) addToUndo(item undoItem) {
 	m.undoStack = append(m.undoStack, item)
-	// Keep only last 10 items
-	if len(m.undoStack) > 10 {
+	// Keep only last N items
+	if len(m.undoStack) > maxUndoStackSize {
 		m.undoStack = m.undoStack[1:]
 	}
 }
 
 func (m *model) searchFileContent(query string) error {
-	results, err := search.SearchFileContent(query, m.currentDir, m.showHidden)
+	// Create dummy cancel channel for sync operation
+	cancelChan := make(chan struct{})
+	defer close(cancelChan)
+
+	results, err := search.SearchFileContent(query, m.currentDir, m.showHidden, cancelChan)
 	if err != nil {
 		return err
 	}
@@ -384,60 +514,57 @@ func (m *model) searchFileContent(query string) error {
 	return nil
 }
 
-func (m *model) updateFilter() {
+func (m *model) updateFilter() tea.Cmd {
 	query := m.searchInput.Value()
 	if query == "" {
 		m.filteredFiles = m.files
 		m.searchMatches = [][]int{}
 		m.statusMsg = ""
-		return
+		m.cancelCurrentSearch()
+		m.loading = false
+		return nil
 	}
 
-	// For short queries (< 2 chars), skip expensive searches
-	if len(query) < 2 && (m.recursiveSearch || m.currentSearchType == searchContent) {
-		m.statusMsg = "Type at least 2 characters to search"
+	// For short queries (< N chars), skip expensive searches
+	isExpensiveSearch := m.currentSearchType == searchContent ||
+		m.currentSearchType == searchRecursive ||
+		m.currentSearchType == searchUltra ||
+		m.recursiveSearch
+	if len(query) < minSearchChars && isExpensiveSearch {
+		m.statusMsg = fmt.Sprintf("Type at least %d characters to search", minSearchChars)
 		m.statusExpiry = time.Now().Add(2 * time.Second)
-		return
+		m.cancelCurrentSearch()
+		m.loading = false
+		return nil
 	}
 
-	if m.currentSearchType == searchContent {
-		// Content search using ripgrep
-		if err := m.searchFileContent(query); err != nil {
-			m.statusMsg = fmt.Sprintf("Search error: %v", err)
-			m.statusExpiry = time.Now().Add(3 * time.Second)
-			m.filteredFiles = []fileItem{}
-		} else {
-			m.statusMsg = fmt.Sprintf("Found %d matches", len(m.filteredFiles))
-			m.statusExpiry = time.Now().Add(3 * time.Second)
-		}
-	} else {
-		// Filename search
-		if m.recursiveSearch {
-			// Recursive search across entire project
-			m.recursiveSearchFiles(query)
-		} else {
-			// Search in current directory only
-			m.searchCurrentDir(query)
-		}
-		m.statusMsg = fmt.Sprintf("Found %d files", len(m.filteredFiles))
-		m.statusExpiry = time.Now().Add(3 * time.Second)
+	// For expensive searches, use async + debounce
+	if isExpensiveSearch {
+		m.cancelCurrentSearch() // Cancel any ongoing search
+		return searchDebounce(query)
 	}
+
+	// For simple current directory search, still do it synchronously (it's fast)
+	m.searchCurrentDir(query)
+	m.statusMsg = fmt.Sprintf("Found %d files", len(m.filteredFiles))
+	m.statusExpiry = time.Now().Add(3 * time.Second)
 
 	// Reset cursor if it's out of bounds
 	if m.cursor >= len(m.filteredFiles) {
 		m.cursor = 0
 	}
+	return nil
 }
 
 func (m *model) searchCurrentDir(query string) {
-	// Build list of file names for fuzzy matching
+	// Build list of file names for substring matching
 	names := make([]string, len(m.files))
 	for i, file := range m.files {
 		names[i] = file.name
 	}
 
-	// Use search module for fuzzy matching
-	matches := search.FuzzyMatchNames(query, names)
+	// Use search module for substring matching
+	matches := search.SubstringMatchNames(query, names)
 
 	m.filteredFiles = []fileItem{}
 	m.searchMatches = [][]int{}
@@ -449,7 +576,11 @@ func (m *model) searchCurrentDir(query string) {
 }
 
 func (m *model) recursiveSearchFiles(query string) {
-	results, matches := search.RecursiveSearchFiles(query, m.currentDir, m.showHidden, utils.ShouldIgnore)
+	// Create dummy cancel channel for sync operation
+	cancelChan := make(chan struct{})
+	defer close(cancelChan)
+
+	results, matches := search.RecursiveSearchFiles(query, m.currentDir, m.showHidden, utils.ShouldIgnore, cancelChan, nil, m.config.MaxResults, m.config.MaxDepth, m.config.MaxFilesScanned, m.config.SkipDirectories)
 
 	// Convert search results to fileItems
 	m.filteredFiles = []fileItem{}
@@ -469,8 +600,279 @@ func (m *model) recursiveSearchFiles(query string) {
 	}
 }
 
+func (m *model) ultraSearchFiles(query string) {
+	drives := utils.GetMountedDrives()
+
+	m.filteredFiles = []fileItem{}
+	m.searchMatches = [][]int{}
+
+	// Create dummy cancel channel for sync operation
+	cancelChan := make(chan struct{})
+	defer close(cancelChan)
+
+	// Search across all drives
+	for _, drive := range drives {
+		results, matches := search.RecursiveSearchFiles(query, drive, m.showHidden, utils.ShouldIgnore, cancelChan, nil, m.config.MaxResults, m.config.MaxDepth, m.config.MaxFilesScanned, m.config.SkipDirectories)
+
+		for i, result := range results {
+			// Add drive label prefix to display name for clarity
+			driveLabel := utils.GetDriveLabel(drive)
+			displayName := fmt.Sprintf("[%s] %s", driveLabel, result.DisplayName)
+
+			m.filteredFiles = append(m.filteredFiles, fileItem{
+				path:    result.Path,
+				name:    displayName,
+				isDir:   result.IsDir,
+				size:    result.Size,
+				modTime: result.ModTime,
+			})
+			if i < len(matches) {
+				m.searchMatches = append(m.searchMatches, matches[i].MatchedIndexes)
+			}
+		}
+	}
+}
+
+// searchDebounce returns a command that waits before triggering search
+func searchDebounce(query string) tea.Cmd {
+	return tea.Tick(searchDebounceDelay, func(t time.Time) tea.Msg {
+		return searchDebounceMsg{query: query}
+	})
+}
+
+// cancelCurrentSearch cancels any ongoing search
+func (m *model) cancelCurrentSearch() {
+	if m.searchCancel != nil {
+		close(m.searchCancel)
+		m.searchCancel = nil
+	}
+	m.searchInProgress = false
+}
+
+// performAsyncSearch runs the appropriate search in a goroutine
+func (m *model) performAsyncSearch(query string) tea.Cmd {
+	// Cancel any previous search
+	m.cancelCurrentSearch()
+
+	// Create new cancellation channel
+	m.searchCancel = make(chan struct{})
+	m.searchInProgress = true
+	m.scannedFiles = 0
+	cancelChan := m.searchCancel
+
+	// Capture the necessary state before going async
+	searchType := m.currentSearchType
+	currentDir := m.currentDir
+	showHidden := true // Always search hidden files - if you're searching, you want to find it
+	maxResults := m.config.MaxResults
+	maxDepth := m.config.MaxDepth
+	maxFilesScanned := m.config.MaxFilesScanned
+	skipDirectories := m.config.SkipDirectories
+
+	// Clear previous results and show loading
+	m.filteredFiles = []fileItem{}
+	m.searchMatches = [][]int{}
+	m.loading = true
+
+	// Create result channel
+	resultChan := make(chan tea.Msg, 10) // Buffered to handle bursts of progress updates
+	m.searchResultChan = resultChan
+
+	// Launch search in goroutine
+	go func() {
+		var files []fileItem
+		var matches [][]int
+		var err error
+
+		// Progress callback - updates m.scannedFiles (will be polled by ticker)
+		var currentDrive string
+		onProgress := func(scanned int) {
+			// Send progress update
+			select {
+			case resultChan <- searchPartialMsg{count: scanned, drive: currentDrive}:
+			default:
+			}
+		}
+
+		// Run the appropriate search based on type
+		switch searchType {
+		case searchContent:
+			results, searchErr := search.SearchFileContent(query, currentDir, showHidden, cancelChan)
+			if searchErr != nil {
+				err = searchErr
+			} else {
+				// Convert results to fileItems
+				for _, result := range results {
+					select {
+					case <-cancelChan:
+						resultChan <- searchCompleteMsg{}
+						return
+					default:
+					}
+					files = append(files, fileItem{
+						path:  result.Path,
+						name:  result.DisplayName,
+						isDir: result.IsDir,
+						size:  int64(result.LineNumber),
+					})
+				}
+			}
+
+		case searchRecursive:
+			results, matchResults := search.RecursiveSearchFiles(query, currentDir, showHidden, utils.ShouldIgnore, cancelChan, onProgress, maxResults, maxDepth, maxFilesScanned, skipDirectories)
+			for i, result := range results {
+				select {
+				case <-cancelChan:
+					resultChan <- searchCompleteMsg{}
+					return
+				default:
+				}
+				files = append(files, fileItem{
+					path:    result.Path,
+					name:    result.DisplayName,
+					isDir:   result.IsDir,
+					size:    result.Size,
+					modTime: result.ModTime,
+				})
+				if i < len(matchResults) {
+					matches = append(matches, matchResults[i].MatchedIndexes)
+				}
+			}
+
+		case searchUltra:
+			drives := utils.GetMountedDrives()
+
+			// Channel to collect results from all drive searches
+			type driveResult struct {
+				files   []fileItem
+				matches [][]int
+			}
+			resultsChan := make(chan driveResult, len(drives))
+
+			// Use WaitGroup to track parallel searches
+			var wg sync.WaitGroup
+
+			// Launch parallel search for each drive
+			for _, drive := range drives {
+				wg.Add(1)
+				go func(drivePath string) {
+					defer wg.Done()
+
+					select {
+					case <-cancelChan:
+						return
+					default:
+					}
+
+					// Notify which drive we're searching
+					driveLabel := utils.GetDriveLabel(drivePath)
+					resultChan <- searchPartialMsg{count: 0, drive: driveLabel}
+
+					// Progress callback for this drive
+					driveProgress := func(scanned int) {
+						select {
+						case resultChan <- searchPartialMsg{count: scanned, drive: driveLabel}:
+						default:
+						}
+					}
+
+					// Search this drive
+					results, matchResults := search.RecursiveSearchFiles(query, drivePath, showHidden, utils.ShouldIgnore, cancelChan, driveProgress, maxResults, maxDepth, maxFilesScanned, skipDirectories)
+
+					// Convert to fileItems with drive label
+					var driveFiles []fileItem
+					var driveMatches [][]int
+					for i, result := range results {
+						displayName := fmt.Sprintf("[%s] %s", driveLabel, result.DisplayName)
+						prefixLen := len(fmt.Sprintf("[%s] ", driveLabel))
+
+						driveFiles = append(driveFiles, fileItem{
+							path:    result.Path,
+							name:    displayName,
+							isDir:   result.IsDir,
+							size:    result.Size,
+							modTime: result.ModTime,
+						})
+
+						// Adjust match positions to account for drive label prefix
+						if i < len(matchResults) {
+							adjustedMatches := make([]int, len(matchResults[i].MatchedIndexes))
+							for j, pos := range matchResults[i].MatchedIndexes {
+								adjustedMatches[j] = pos + prefixLen
+							}
+							driveMatches = append(driveMatches, adjustedMatches)
+						}
+					}
+
+					// Send this drive's results
+					select {
+					case resultsChan <- driveResult{files: driveFiles, matches: driveMatches}:
+					case <-cancelChan:
+						return
+					}
+				}(drive)
+			}
+
+			// Collector goroutine - waits for all drives and closes channel
+			go func() {
+				wg.Wait()
+				close(resultsChan)
+			}()
+
+			// Collect results from all drives as they complete
+			for result := range resultsChan {
+				files = append(files, result.files...)
+				matches = append(matches, result.matches...)
+				// Send intermediate results so UI updates immediately
+				resultChan <- searchResultMsg{files: files, matches: matches}
+			}
+			// All drives complete - send final complete message
+			resultChan <- searchCompleteMsg{}
+			return
+
+		default: // searchFilename
+			results, matchResults := search.RecursiveSearchFiles(query, currentDir, showHidden, utils.ShouldIgnore, cancelChan, onProgress, maxResults, maxDepth, maxFilesScanned, skipDirectories)
+			for i, result := range results {
+				select {
+				case <-cancelChan:
+					resultChan <- searchCompleteMsg{}
+					return
+				default:
+				}
+				files = append(files, fileItem{
+					path:    result.Path,
+					name:    result.DisplayName,
+					isDir:   result.IsDir,
+					size:    result.Size,
+					modTime: result.ModTime,
+				})
+				if i < len(matchResults) {
+					matches = append(matches, matchResults[i].MatchedIndexes)
+				}
+			}
+		}
+
+		// Send final results
+		if err != nil {
+			resultChan <- searchErrorMsg{err: err}
+		} else {
+			resultChan <- searchResultMsg{files: files, matches: matches}
+		}
+	}()
+
+	// Return command that waits for next message from search
+	return waitForSearchMsg(resultChan)
+}
+
+// waitForSearchMsg returns a command that waits for the next search message
+func waitForSearchMsg(ch chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		return <-ch
+	}
+}
+
 func previewUpdateAfterDelay() tea.Cmd {
-	return tea.Tick(250*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(previewUpdateDelay, func(t time.Time) tea.Msg {
 		return previewUpdateMsg{}
 	})
 }
@@ -496,7 +898,7 @@ func (m *model) moveCursor(newPos int) tea.Cmd {
 	}
 
 	// If scrolling fast, schedule a delayed check to see if scrolling stopped
-	return tea.Tick(250*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(previewUpdateDelay, func(t time.Time) tea.Msg {
 		return previewUpdateMsg{}
 	})
 }
@@ -576,8 +978,8 @@ func (m *model) previewDirectory(path string) string {
 
 	count := 0
 	for _, entry := range entries {
-		if count >= 20 {
-			preview.WriteString(fmt.Sprintf("\n... and %d more items", len(entries)-20))
+		if count >= maxPreviewItems {
+			preview.WriteString(fmt.Sprintf("\n... and %d more items", len(entries)-maxPreviewItems))
 			break
 		}
 
@@ -610,6 +1012,7 @@ func (m *model) previewFile(path string) string {
 	preview.WriteString(fmt.Sprintf("%s %s\n", icon, filepath.Base(path)))
 	preview.WriteString(fmt.Sprintf("Size: %s\n", utils.FormatFileSizeColored(info.Size())))
 	preview.WriteString(fmt.Sprintf("Modified: %s\n", info.ModTime().Format("Jan 2, 2006 15:04")))
+	preview.WriteString(fmt.Sprintf("Permissions: %s\n", info.Mode().String()))
 
 	if m.gitModified[path] {
 		preview.WriteString("Git: Modified\n")
@@ -617,9 +1020,12 @@ func (m *model) previewFile(path string) string {
 
 	preview.WriteString("\n")
 
-	// Don't preview binary or large files
+	// Check if binary or large file
 	if info.Size() > 1024*1024 || utils.IsBinaryFile(path) {
-		preview.WriteString("(Binary or large file - no preview)")
+		preview.WriteString("─── File Metadata ───\n\n")
+		preview.WriteString(fmt.Sprintf("Type: %s\n", strings.ToUpper(strings.TrimPrefix(filepath.Ext(path), "."))))
+		preview.WriteString(fmt.Sprintf("Full Path: %s\n", path))
+		preview.WriteString("\n(Binary file - preview unavailable)")
 		return preview.String()
 	}
 
@@ -649,9 +1055,12 @@ func (m *model) updateFrecency(dir string) {
 	// Update last visited timestamp
 	m.config.LastVisited[dir] = time.Now().Format(time.RFC3339)
 
-	// Save config periodically (every 10 visits)
-	if m.config.Frecency[dir]%10 == 0 {
-		config.Save(m.config)
+	// Save config periodically (every N visits)
+	if m.config.Frecency[dir]%configSaveInterval == 0 {
+		if err := config.Save(m.config); err != nil {
+			// Silently log error - don't interrupt user experience for config save failures
+			// The error will be logged by config.Save itself
+		}
 	}
 }
 
@@ -698,8 +1107,8 @@ func (m *model) addToHistory(dir string) {
 	m.dirHistory = append(m.dirHistory, dir)
 	m.historyIndex = len(m.dirHistory) - 1
 
-	// Limit history size to 100 entries
-	if len(m.dirHistory) > 100 {
+	// Limit history size to N entries
+	if len(m.dirHistory) > maxHistoryEntries {
 		m.dirHistory = m.dirHistory[1:]
 		m.historyIndex--
 	}
