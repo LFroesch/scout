@@ -2,16 +2,15 @@
 
 ## Current Tasks
 
-- fix clicking in search
-- show full? path above file name in preview?
+- update readme
 - weird on small terminals?
 - normalize to X client type (ps, wsl, ???)
 - searching is actually great now but lets make the UI a little sexier
-- binary check may not be working
-- change "o" to be configurable instead of only vscode
+- binary check not working?
 - Caching whatever we can cleanly
 - Add bookmark pinning/favoriting system (quick dial integration with frecency) split panel? quick dial one side, frecent on other? more columns? idk
 - Cross-platform testing (Windows, macOS, verify clipboard)
+- test if it works with not vscode (vim/etc)
 
 ### Code Quality & Testing
 
@@ -38,6 +37,44 @@
 - Demo GIF and comparison section in README
 
 ## DevLog
+
+### 2026-01-10 - Status Bar Styling Fix
+- **Consistent background colors**: All status bar text now has explicit bg 235 - fixes rendering issues where background wasn't applied consistently
+- **Proper label styling**: Labels like "Branch:", "Sort:" use purple (99) with bold and bg 235
+- **Proper value styling**: Values like branch name, sort mode use white (255) with bg 235
+- **Fixed separators**: All separators (":", " | ", "/") now use whiteStyle with bg 235
+- **Keybind hints**: All keybind labels (purple) and descriptions (white) properly styled with bg 235
+
+### 2026-01-10 - UI Polish & Search Mode Improvements
+- **Enhanced status bar styling**: Numbers and keybinds now styled in purple (99) with darker background (235) - file counts, clipboard counts, scanned files, and all keybind hints are highlighted
+- **Middle-click documentation**: Added middle-click keybind description to help page showing navigation to clicked directory/parent
+- **Hidden files toggle in search**: Added `.` key support in search mode to toggle hidden files - works while actively searching and updates results in real-time
+
+### 2026-01-10 - Preview Panel Height Fix
+- **Fixed height calculation bug**: Changed contentHeight from `availableHeight - 2` to `availableHeight - 1` to properly account for header (was causing panels to be 1 line too short, making status bar clip)
+- **Added MaxHeight enforcement**: Both renderFileList() and renderPreview() borderStyles now use MaxHeight() in addition to Height() to strictly prevent content overflow
+- **Added strict line limiting**: Preview content enforces maximum line count (`availableHeight - 1`) to prevent overflow beyond available height
+- **Removed double height styling**: Eliminated outer Height() wrappers since panels already set heights internally
+- **Fixed status bar clipping**: Both panels now render at exactly the correct height, leaving proper space for status bar
+
+### 2026-01-10 - Keybinding UX Improvements
+- **Removed 'e' keybinding**: Simplified keybindings by removing confusing 'e' key - now just ENTER, 'o', and 'f' with clear purposes
+- **Smart file opening with fallback**: Both ENTER and 'o' now try editor/VS Code first (code→vim→nano→vi), then fall back to system default if no editor found - always provides feedback
+- **Content search line jumping**: When opening files from content search results, both ENTER and 'o' open the file at the matching line number
+- **'f' key navigation**: Press 'f' to navigate to selected directory (or parent of file) in scout - works in both normal and search modes, exits search mode automatically
+- **Cancel searches on navigation**: When exiting search mode via navigation (f key, middle-click, enter on dir), in-progress searches are now cancelled to prevent unexpected results
+- **Dynamic status bar hints**: Status bar shows what ENTER/O/F will do based on selected item - "enter: open | o: editor | f: parent dir" for files, "enter: open | o: VS Code" for dirs
+
+### 2026-01-10 - Search Mode UX Enhancements
+- **Drive path in status bar**: Status bar now shows full path (e.g., "/mnt/c") during drive scanning instead of just file count - makes it clear which drive is being searched
+- **File open feedback**: Shows "Can't open [file] via scout" in status bar when double-click/enter can't open a file - clear feedback instead of silent failures
+- **Middle-click navigation**: Middle-click on any file/directory in search or normal mode navigates to that directory (or parent if file) in scout - exits search mode and loads the location
+
+### 2026-01-10 - Hidden Files, Mouse Clicks & Preview Path
+- **Hidden files default behavior**: Confirmed hidden files show by default (config default: `ShowHidden: true`) - toggle with `.` key affects file browser only, search always shows hidden files regardless of toggle state
+- **Fixed mouse click offset in search**: Mouse clicks now calculate visible height correctly accounting for scroll indicators - prevents clicking wrong items when list is scrolled
+- **Fixed mouse click offset in normal mode**: Applied same fix to normal file browser mode for consistent behavior
+- **Full path in preview**: Preview pane now displays full file/directory path below the filename for both file browser and search results - helps identify exact location when navigating deep directories
 
 ### 2026-01-09 - Search UX Improvements
 - **'q' key in locked search**: Press 'q' when search results are locked to exit search mode (same as ESC) - types normally when actively searching

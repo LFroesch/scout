@@ -35,6 +35,13 @@ type searchPartialMsg struct {
 type searchCompleteMsg struct{}
 type searchErrorMsg struct{ err error }
 
+// File open result message
+type fileOpenResultMsg struct {
+	success bool
+	message string
+	path    string
+}
+
 // Terminal dimension constants
 const (
 	minTerminalWidth  = 60  // Minimum usable width
@@ -974,6 +981,7 @@ func (m *model) previewDirectory(path string) string {
 
 	var preview strings.Builder
 	preview.WriteString(fmt.Sprintf("📁 Directory: %s\n", filepath.Base(path)))
+	preview.WriteString(fmt.Sprintf("Path: %s\n", path))
 	preview.WriteString(fmt.Sprintf("Items: %d\n\n", len(entries)))
 
 	count := 0
@@ -1010,6 +1018,7 @@ func (m *model) previewFile(path string) string {
 	// File info header
 	icon := utils.GetFileIcon(filepath.Base(path))
 	preview.WriteString(fmt.Sprintf("%s %s\n", icon, filepath.Base(path)))
+	preview.WriteString(fmt.Sprintf("Path: %s\n", path))
 	preview.WriteString(fmt.Sprintf("Size: %s\n", utils.FormatFileSizeColored(info.Size())))
 	preview.WriteString(fmt.Sprintf("Modified: %s\n", info.ModTime().Format("Jan 2, 2006 15:04")))
 	preview.WriteString(fmt.Sprintf("Permissions: %s\n", info.Mode().String()))
