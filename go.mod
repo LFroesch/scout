@@ -7,7 +7,6 @@ require (
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.6
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/sahilm/fuzzy v0.1.1
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
 )
 

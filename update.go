@@ -33,12 +33,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		// Skip if dimensions haven't actually changed (debouncing)
+		if msg.Width == m.width && msg.Height == m.height {
+			return m, nil
+		}
+
+		// Enforce minimum dimensions for small terminals
 		m.width = msg.Width
 		m.height = msg.Height
+		if m.width < minTerminalWidth {
+			m.width = minTerminalWidth
+		}
+		if m.height < minTerminalHeight {
+			m.height = minTerminalHeight
+		}
 
 		// Recalculate scroll positions for new height
 		if len(m.filteredFiles) > 0 {
-			availableHeight := m.height - 9
+			availableHeight := m.height - uiOverhead
 			if availableHeight < 3 {
 				availableHeight = 3
 			}
@@ -86,12 +98,109 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case searchDebounceMsg:
+		// Debounce timer expired, start the actual search
+		currentQuery := m.searchInput.Value()
+		if currentQuery == msg.query && m.mode == modeSearch {
+			return m, m.performAsyncSearch(msg.query)
+		}
+		return m, nil
+
+	case searchResultMsg:
+		// Got search results (partial or final)
+		if m.searchInProgress {
+			m.filteredFiles = msg.files
+			m.searchMatches = msg.matches
+			// Don't mark as complete yet - might be partial results
+			// searchCompleteMsg will mark it complete
+
+			// Show current result count
+			resultCount := len(m.filteredFiles)
+			if resultCount > 5000 {
+				m.statusMsg = fmt.Sprintf("Found %d files so far (search continues...)", resultCount)
+			} else {
+				m.statusMsg = fmt.Sprintf("Found %d files (searching...)", resultCount)
+			}
+
+			// Reset cursor if needed
+			if m.cursor >= len(m.filteredFiles) {
+				m.cursor = 0
+			}
+			m.scrollOffset = 0
+			m.updatePreview()
+
+			// Keep listening for more results
+			if m.searchResultChan != nil {
+				return m, waitForSearchMsg(m.searchResultChan)
+			}
+		}
+		return m, nil
+
+	case searchCompleteMsg:
+		// Search complete (all drives finished)
+		m.searchInProgress = false
+		m.loading = false
+		m.searchResultChan = nil // Stop listening for more messages
+
+		// Update status with final count
+		if len(m.filteredFiles) > 0 {
+			if len(m.filteredFiles) > 5000 {
+				m.statusMsg = fmt.Sprintf("Search complete: %d files (large result set)", len(m.filteredFiles))
+			} else {
+				m.statusMsg = fmt.Sprintf("Search complete: %d files", len(m.filteredFiles))
+			}
+			m.statusExpiry = time.Now().Add(3 * time.Second)
+		}
+		return m, nil
+
+	case searchErrorMsg:
+		// Search error occurred
+		m.searchInProgress = false
+		m.loading = false
+		m.searchResultChan = nil // Stop listening for more messages
+		m.statusMsg = fmt.Sprintf("Search error: %v", msg.err)
+		m.statusExpiry = time.Now().Add(3 * time.Second)
+		return m, nil
+
+	case searchPartialMsg:
+		// Update progress status with drive info if available
+		m.scannedFiles = msg.count
+		if msg.drive != "" {
+			if msg.count > 0 {
+				m.statusMsg = fmt.Sprintf("Searching %s... %d files scanned", msg.drive, msg.count)
+			} else {
+				m.statusMsg = fmt.Sprintf("Searching %s...", msg.drive)
+			}
+		} else {
+			m.statusMsg = fmt.Sprintf("Searching... %d files scanned", msg.count)
+		}
+		// Keep listening for more messages
+		if m.searchResultChan != nil {
+			return m, waitForSearchMsg(m.searchResultChan)
+		}
+		return m, nil
+
 	case tea.MouseMsg:
 		// Handle mouse wheel scroll
 		if msg.Action == tea.MouseActionPress && (msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
 			switch m.mode {
 			case modeNormal:
 				// Scroll in file list
+				if msg.Button == tea.MouseButtonWheelUp {
+					if m.cursor > 0 {
+						m.cursor--
+						m.updatePreview()
+					}
+				} else {
+					if m.cursor < len(m.filteredFiles)-1 {
+						m.cursor++
+						m.updatePreview()
+					}
+				}
+				return m, nil
+
+			case modeSearch:
+				// Scroll in search results
 				if msg.Button == tea.MouseButtonWheelUp {
 					if m.cursor > 0 {
 						m.cursor--
@@ -134,6 +243,62 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle mouse click
 		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
 			switch m.mode {
+			case modeSearch:
+				// Mouse click in search results
+				if len(m.filteredFiles) > 0 {
+					clickY := msg.Y - 3 // Adjust for header
+					if clickY >= 0 && clickY < len(m.filteredFiles)-m.scrollOffset {
+						newCursor := m.scrollOffset + clickY
+						if newCursor >= 0 && newCursor < len(m.filteredFiles) {
+							// Check for double-click
+							now := time.Now()
+							isDoubleClick := !m.lastClickTime.IsZero() &&
+								now.Sub(m.lastClickTime) <= m.doubleClickThreshold &&
+								m.lastClickY == clickY &&
+								m.lastClickMode == modeSearch &&
+								m.cursor == newCursor
+
+							if isDoubleClick {
+								// Double-click: open file or enter directory
+								m.lastClickTime = time.Time{} // Reset to prevent triple-click
+								selected := m.filteredFiles[m.cursor]
+								if selected.isDir {
+									if selected.name != ".." && !m.searchResultsLocked {
+										// If results are not locked, just select it
+										return m, m.moveCursor(newCursor)
+									}
+									// If locked, navigate into directory
+									if m.searchResultsLocked {
+										m.addToHistory(selected.path)
+										m.currentDir = selected.path
+										m.cursor = 0
+										m.scrollOffset = 0
+										m.previewScroll = 0
+										m.mode = modeNormal
+										m.searchResultsLocked = false
+										m.searchInput.SetValue("")
+										m.recursiveSearch = false
+										m.currentSearchType = searchFilename
+										m.loadFiles()
+										m.gitModified = git.GetModifiedFiles(m.currentDir)
+										m.gitBranch = git.GetBranch(m.currentDir)
+										m.updatePreview()
+									}
+								} else {
+									// Open file
+									return m, m.openFile(selected.path)
+								}
+							} else {
+								// Single-click: select
+								m.lastClickTime = now
+								m.lastClickY = clickY
+								m.lastClickMode = modeSearch
+								return m, m.moveCursor(newCursor)
+							}
+						}
+					}
+				}
+
 			case modeNormal:
 				// Mouse click in file list area
 				if len(m.filteredFiles) > 0 {
@@ -141,7 +306,58 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if clickY >= 0 && clickY < len(m.filteredFiles)-m.scrollOffset {
 						newCursor := m.scrollOffset + clickY
 						if newCursor >= 0 && newCursor < len(m.filteredFiles) {
-							return m, m.moveCursor(newCursor)
+							// Check for double-click
+							now := time.Now()
+							isDoubleClick := !m.lastClickTime.IsZero() &&
+								now.Sub(m.lastClickTime) <= m.doubleClickThreshold &&
+								m.lastClickY == clickY &&
+								m.lastClickMode == modeNormal &&
+								m.cursor == newCursor
+
+							if isDoubleClick {
+								// Double-click: enter directory or open file
+								m.lastClickTime = time.Time{} // Reset to prevent triple-click
+								selected := m.filteredFiles[m.cursor]
+								if selected.isDir {
+									if selected.name == ".." {
+										// Navigate to parent directory
+										parentDir := filepath.Dir(m.currentDir)
+										if m.config.RootPath == "" || strings.HasPrefix(parentDir, m.config.RootPath) {
+											m.addToHistory(parentDir)
+											m.currentDir = parentDir
+											m.cursor = 0
+											m.scrollOffset = 0
+											m.previewScroll = 0
+											m.loadFiles()
+											m.gitModified = git.GetModifiedFiles(m.currentDir)
+											m.gitBranch = git.GetBranch(m.currentDir)
+											m.updatePreview()
+										}
+									} else {
+										// Enter directory
+										if m.config.RootPath == "" || strings.HasPrefix(selected.path, m.config.RootPath) {
+											m.addToHistory(selected.path)
+											m.currentDir = selected.path
+											m.cursor = 0
+											m.scrollOffset = 0
+											m.previewScroll = 0
+											m.loadFiles()
+											m.gitModified = git.GetModifiedFiles(m.currentDir)
+											m.gitBranch = git.GetBranch(m.currentDir)
+											m.updatePreview()
+										}
+									}
+								} else {
+									// Open file with default application
+									return m, m.openFile(selected.path)
+								}
+							} else {
+								// Single-click: select and preview
+								m.lastClickTime = now
+								m.lastClickY = clickY
+								m.lastClickMode = modeNormal
+								return m, m.moveCursor(newCursor)
+							}
 						}
 					}
 				}
@@ -150,7 +366,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Click in bookmarks list with scroll support
 				if len(m.sortedBookmarkPaths) > 0 {
 					// Calculate scroll offset (same logic as renderBookmarksView)
-					availableHeight := m.height - 9
+					availableHeight := m.height - uiOverhead
 					if availableHeight < 3 {
 						availableHeight = 3
 					}
@@ -199,23 +415,41 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if clickY >= 0 {
 						newCursor := scrollOffset + clickY
 						if newCursor >= 0 && newCursor < len(m.sortedBookmarkPaths) {
-							m.bookmarksCursor = newCursor
-							// Navigate to bookmark (same as enter key)
-							targetPath := m.sortedBookmarkPaths[m.bookmarksCursor]
-							if m.config.RootPath == "" || strings.HasPrefix(targetPath, m.config.RootPath) {
-								m.addToHistory(targetPath)
-								m.currentDir = targetPath
-								m.cursor = 0
-								m.scrollOffset = 0
-								m.previewScroll = 0
-								m.mode = modeNormal
-								m.loadFiles()
-								m.gitModified = git.GetModifiedFiles(m.currentDir)
-								m.gitBranch = git.GetBranch(m.currentDir)
-								m.updatePreview()
-								// Save config immediately after bookmark navigation to persist frecency
-								config.Save(m.config)
-								return m, nil
+							// Check for double-click
+							now := time.Now()
+							isDoubleClick := !m.lastClickTime.IsZero() &&
+								now.Sub(m.lastClickTime) <= m.doubleClickThreshold &&
+								m.lastClickY == clickY &&
+								m.lastClickMode == modeBookmarks &&
+								m.bookmarksCursor == newCursor
+
+							if isDoubleClick {
+								// Double-click: navigate to bookmark
+								m.lastClickTime = time.Time{} // Reset to prevent triple-click
+								targetPath := m.sortedBookmarkPaths[m.bookmarksCursor]
+								if m.config.RootPath == "" || strings.HasPrefix(targetPath, m.config.RootPath) {
+									m.addToHistory(targetPath)
+									m.currentDir = targetPath
+									m.cursor = 0
+									m.scrollOffset = 0
+									m.previewScroll = 0
+									m.mode = modeNormal
+									m.loadFiles()
+									m.gitModified = git.GetModifiedFiles(m.currentDir)
+									m.gitBranch = git.GetBranch(m.currentDir)
+									m.updatePreview()
+									// Save config immediately after bookmark navigation to persist frecency
+									if err := config.Save(m.config); err != nil {
+										m.showError("Config Save Failed", fmt.Sprintf("Failed to save config: %v", err))
+									}
+									return m, nil
+								}
+							} else {
+								// Single-click: select bookmark
+								m.bookmarksCursor = newCursor
+								m.lastClickTime = now
+								m.lastClickY = clickY
+								m.lastClickMode = modeBookmarks
 							}
 						}
 					}
@@ -258,7 +492,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.gitModified = git.GetModifiedFiles(m.currentDir)
 						m.gitBranch = git.GetBranch(m.currentDir)
 						// Save config immediately after bookmark navigation to persist frecency
-						config.Save(m.config)
+						if err := config.Save(m.config); err != nil {
+							m.showError("Config Save Failed", fmt.Sprintf("Failed to save config: %v", err))
+						}
 					}
 				}
 				return m, nil
@@ -299,7 +535,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.bookmarksCursor >= len(m.sortedBookmarkPaths) && len(m.sortedBookmarkPaths) > 0 {
 						m.bookmarksCursor = len(m.sortedBookmarkPaths) - 1
 					}
-					config.Save(m.config)
+					if err := config.Save(m.config); err != nil {
+						m.showError("Config Save Failed", fmt.Sprintf("Failed to save config: %v", err))
+					}
 					m.statusMsg = fmt.Sprintf("Deleted bookmark: %s", bookmarkName)
 					m.statusExpiry = time.Now().Add(2 * time.Second)
 				}
@@ -448,14 +686,69 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case modeSearch:
 			switch msg.String() {
+			case "S":
+				// Cycle through sort modes for search results
+				m.sortBy = (m.sortBy + 1) % 4
+				// Re-sort the filtered files
+				m.sortSearchResults()
+				sortNames := map[sortMode]string{
+					sortByName: "Name",
+					sortBySize: "Size",
+					sortByDate: "Date",
+					sortByType: "Type",
+				}
+				m.statusMsg = fmt.Sprintf("Sorted by: %s", sortNames[m.sortBy])
+				m.statusExpiry = time.Now().Add(2 * time.Second)
+				return m, nil
+
+			case "/":
+				// Start a fresh search - clear everything
+				m.searchResultsLocked = false
+				m.searchInput.SetValue("")
+				m.filteredFiles = m.files
+				m.searchMatches = [][]int{}
+				m.cursor = 0
+				m.scrollOffset = 0
+				m.currentSearchType = searchFilename
+				m.recursiveSearch = false
+				m.cancelCurrentSearch()
+				m.loading = false
+				m.statusMsg = ""
+				m.searchInput.Focus()
+				m.updatePreview()
+				return m, textinput.Blink
+
 			case "esc":
-				// First ESC clears input, second ESC exits search
-				if m.searchInput.Value() != "" {
+				// Cancel any ongoing search
+				m.cancelCurrentSearch()
+				m.loading = false
+
+				// If results are locked, clear everything and exit search
+				if m.searchResultsLocked {
+					m.searchResultsLocked = false
 					m.searchInput.SetValue("")
 					m.filteredFiles = m.files
 					m.searchMatches = [][]int{}
+					m.cursor = 0
+					m.scrollOffset = 0
+					m.mode = modeNormal
+					m.recursiveSearch = false
+					m.currentSearchType = searchFilename
+					m.updatePreview()
+					return m, nil
+				}
+
+				// Progressive clearing: clear query first, then exit search mode
+				if m.searchInput.Value() != "" {
+					// Clear the search query and restore all files
+					m.searchInput.SetValue("")
+					m.filteredFiles = m.files
+					m.searchMatches = [][]int{}
+					m.cursor = 0
+					m.scrollOffset = 0
 					m.updatePreview()
 				} else {
+					// Empty search - exit search mode completely
 					m.mode = modeNormal
 					m.recursiveSearch = false
 					m.currentSearchType = searchFilename
@@ -463,32 +756,110 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 
+			case "q":
+				// Only handle 'q' as exit when results are locked
+				if m.searchResultsLocked {
+					// Cancel any ongoing search
+					m.cancelCurrentSearch()
+					m.loading = false
+
+					// Clear everything and exit search (same as ESC when locked)
+					m.searchResultsLocked = false
+					m.searchInput.SetValue("")
+					m.filteredFiles = m.files
+					m.searchMatches = [][]int{}
+					m.cursor = 0
+					m.scrollOffset = 0
+					m.mode = modeNormal
+					m.recursiveSearch = false
+					m.currentSearchType = searchFilename
+					m.updatePreview()
+					return m, nil
+				}
+				// When not locked, allow typing 'q' into search input
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
 			case "enter":
-				m.mode = modeNormal
+				// If results are already locked, try to enter a directory
+				if m.searchResultsLocked {
+					if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+						selected := m.filteredFiles[m.cursor]
+						if selected.isDir && selected.name != ".." {
+							// Navigate into the directory and exit search mode
+							m.addToHistory(selected.path)
+							m.currentDir = selected.path
+							m.cursor = 0
+							m.scrollOffset = 0
+							m.previewScroll = 0
+							m.mode = modeNormal
+							m.searchResultsLocked = false
+							m.searchInput.SetValue("")
+							m.recursiveSearch = false
+							m.currentSearchType = searchFilename
+							m.loadFiles()
+							m.gitModified = git.GetModifiedFiles(m.currentDir)
+							m.gitBranch = git.GetBranch(m.currentDir)
+							m.updatePreview()
+						} else if !selected.isDir {
+							// Open file
+							return m, m.openFile(selected.path)
+						}
+					}
+					return m, nil
+				}
+
+				// Lock in search results - stay in search mode but disable input
+				m.searchResultsLocked = true
 				m.loading = false
 				return m, nil
 
 			case "tab":
-				// Cycle through search modes: Current Dir -> Recursive -> Content -> Current Dir
-				if m.currentSearchType == searchFilename && !m.recursiveSearch {
-					// Mode 1 -> Mode 2: Current Dir Filename -> Recursive Filename
-					m.recursiveSearch = true
-					m.statusMsg = "Recursive file search"
-				} else if m.currentSearchType == searchFilename && m.recursiveSearch {
-					// Mode 2 -> Mode 3: Recursive Filename -> Content Search
-					m.currentSearchType = searchContent
-					m.recursiveSearch = true
-					m.statusMsg = "Content search (recursive)"
-				} else {
-					// Mode 3 -> Mode 1: Content Search -> Current Dir Filename
+				// Don't allow mode cycling when results are locked
+				if m.searchResultsLocked {
+					return m, nil
+				}
+
+				// Cycle through search modes: Current Dir -> Recursive -> Content -> Ultra -> Current Dir
+				switch m.currentSearchType {
+				case searchFilename:
+					if !m.recursiveSearch {
+						// Mode 1 -> Mode 2: Current Dir -> Recursive
+						m.recursiveSearch = true
+						m.statusMsg = "Recursive file search"
+					} else {
+						// Mode 2 -> Mode 3: Recursive -> Content
+						m.currentSearchType = searchContent
+						m.recursiveSearch = false
+						m.statusMsg = "Content search"
+					}
+				case searchContent:
+					// Mode 3 -> Mode 4: Content -> Ultra
+					m.currentSearchType = searchUltra
+					m.recursiveSearch = false
+					m.statusMsg = "Ultra search (all drives)"
+				case searchUltra:
+					// Mode 4 -> Mode 1: Ultra -> Current Dir
+					m.currentSearchType = searchFilename
+					m.recursiveSearch = false
+					m.statusMsg = "Current directory file search"
+				default:
+					// Fallback: reset to current dir
 					m.currentSearchType = searchFilename
 					m.recursiveSearch = false
 					m.statusMsg = "Current directory file search"
 				}
 				m.statusExpiry = time.Now().Add(2 * time.Second)
-				m.updateFilter()
+				cmd = m.updateFilter()
 				m.updatePreview()
-				return m, nil
+				return m, cmd
 
 			case "up", "down":
 				// Navigate through filtered results
@@ -511,19 +882,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 
 			default:
+				// Don't allow typing when results are locked
+				if m.searchResultsLocked {
+					return m, nil
+				}
+
 				// Pass all other keys to search input for typing
 				m.searchInput, cmd = m.searchInput.Update(msg)
 
-				// For recursive searches or content search, show loading indicator
-				if m.recursiveSearch || m.currentSearchType == searchContent {
-					m.loading = true
-					m.statusMsg = "Searching..."
-					m.statusExpiry = time.Now().Add(10 * time.Second)
-				}
-
-				m.updateFilter()
-				m.loading = false
+				// Trigger filter update (async for expensive searches)
+				filterCmd := m.updateFilter()
 				m.updatePreview()
+
+				// Combine commands if both exist
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
 				return m, cmd
 			}
 
@@ -551,7 +927,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "ctrl+d":
 				// Half-page down
-				pageSize := (m.height - 9) / 2
+				pageSize := (m.height - uiOverhead) / 2
 				if pageSize < 1 {
 					pageSize = 5
 				}
@@ -566,7 +942,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "ctrl+u":
 				// Half-page up
-				pageSize := (m.height - 9) / 2
+				pageSize := (m.height - uiOverhead) / 2
 				if pageSize < 1 {
 					pageSize = 5
 				}
@@ -578,7 +954,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "ctrl+f":
 				// Full-page down
-				pageSize := m.height - 9
+				pageSize := m.height - uiOverhead
 				if pageSize < 1 {
 					pageSize = 10
 				}
@@ -593,7 +969,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "ctrl+b":
 				// Full-page up
-				pageSize := m.height - 9
+				pageSize := m.height - uiOverhead
 				if pageSize < 1 {
 					pageSize = 10
 				}
@@ -612,7 +988,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "s", "alt+down":
 				// Scroll preview down
 				if m.showPreview && len(m.previewLines) > 0 {
-					availableHeight := m.height - 9
+					availableHeight := m.height - uiOverhead
 					if availableHeight < 3 {
 						availableHeight = 3
 					}
@@ -686,10 +1062,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "/":
 				m.mode = modeSearch
 				m.currentSearchType = searchFilename
-				m.recursiveSearch = false // Always start in current directory mode
+				m.recursiveSearch = false     // Always start in current directory mode
+				m.searchResultsLocked = false // Clear any locked results
 				m.searchInput.SetValue("")
 				m.searchInput.Placeholder = "Search..."
 				m.searchInput.Focus()
+				// Clear any previous search results
+				m.filteredFiles = m.files
+				m.searchMatches = [][]int{}
+				m.cursor = 0
+				m.scrollOffset = 0
 				return m, textinput.Blink
 
 			case ".":
@@ -774,7 +1156,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if selected.isDir {
 						if !utils.Contains(m.config.Bookmarks, selected.path) {
 							m.config.Bookmarks = append(m.config.Bookmarks, selected.path)
-							config.Save(m.config)
+							if err := config.Save(m.config); err != nil {
+								m.showError("Config Save Failed", fmt.Sprintf("Failed to save config: %v", err))
+							}
 							m.statusMsg = fmt.Sprintf("Bookmark added: %s", selected.name)
 							m.statusExpiry = time.Now().Add(2 * time.Second)
 						} else {
@@ -906,6 +1290,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "?":
 				// Show help screen
 				m.mode = modeHelp
+
+			case ",":
+				// Open config file in editor
+				configPath, err := config.GetConfigPath()
+				if err != nil {
+					m.statusMsg = fmt.Sprintf("Error: cannot get config path: %v", err)
+					m.statusExpiry = time.Now().Add(3 * time.Second)
+					return m, nil
+				}
+				return m, m.openInVSCode(configPath)
 			}
 		}
 	}

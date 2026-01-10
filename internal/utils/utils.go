@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -91,20 +92,94 @@ func IsImageFile(name string) bool {
 	return false
 }
 
-// IsBinaryFile returns true if the file is likely binary based on extension
+// hasBinaryContent checks if the first 512 bytes of a file contain binary data
+func hasBinaryContent(path string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false // If we can't open it, assume not binary to avoid hiding files
+	}
+	defer file.Close()
+
+	// Read first 512 bytes
+	buf := make([]byte, 512)
+	n, err := file.Read(buf)
+	if err != nil && n == 0 {
+		return false // Empty file or read error - assume text
+	}
+
+	// Check for null bytes or high ratio of non-printable characters
+	buf = buf[:n]
+	nullBytes := 0
+	nonPrintable := 0
+
+	for _, b := range buf {
+		if b == 0 {
+			nullBytes++
+		}
+		// Count non-printable chars (excluding common whitespace: tab, newline, carriage return)
+		if b < 32 && b != 9 && b != 10 && b != 13 {
+			nonPrintable++
+		}
+		if b > 126 && b < 128 {
+			nonPrintable++
+		}
+	}
+
+	// If we find null bytes, it's likely binary
+	if nullBytes > 0 {
+		return true
+	}
+
+	// If more than 30% non-printable characters, consider it binary
+	if len(buf) > 0 && float64(nonPrintable)/float64(len(buf)) > 0.3 {
+		return true
+	}
+
+	return false
+}
+
+// IsBinaryFile returns true if the file is likely binary based on extension or content
 func IsBinaryFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
+
+	// Known binary extensions - always binary, no need to check content
 	binaryExts := []string{
-		".exe", ".dll", ".so", ".dylib", ".bin", ".dat",
-		".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp",
-		".mp4", ".avi", ".mov", ".mkv", ".mp3", ".wav",
-		".zip", ".tar", ".gz", ".rar", ".7z",
-		".pdf", ".doc", ".docx", ".xls", ".xlsx",
+		// Executables
+		".exe", ".dll", ".so", ".dylib", ".bin", ".o", ".a", ".lib", ".cat", ".icm", ".inf", ".ini",
+		".sys", ".efi", ".elf",
+		// Images
+		".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp", ".tiff", ".tif", ".psd", ".raw",
+		// Video
+		".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".m4v", ".webm",
+		// Audio
+		".mp3", ".wav", ".flac", ".ogg", ".aac", ".wma", ".m4a", ".aiff", ".alac", ".au", ".aifc", ".aif",
+		// Archives
+		".zip", ".tar", ".gz", ".rar", ".7z", ".bz2", ".xz", ".tgz", ".tbz2",
+		// Documents
+		".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+		// Database
+		".db", ".sqlite", ".sqlite3", ".mdb", ".accdb", ".bson",
+		// Fonts
+		".ttf", ".otf", ".woff", ".woff2", ".eot",
+		// Other
+		".class", ".pyc", ".pyd", ".elc", ".jar", ".war", ".ear", ".state", ".forge", ".h", ".pck", ".tga", ".mui",
 	}
 
 	for _, binExt := range binaryExts {
 		if ext == binExt {
 			return true
+		}
+	}
+
+	// Greylist - extensions that are usually text but can sometimes be binary
+	// Check content for these files
+	greylistExts := []string{
+		".log", ".dat", ".txt", ".cache", ".tmp", ".bak", ".old",
+	}
+
+	for _, greyExt := range greylistExts {
+		if ext == greyExt {
+			return hasBinaryContent(path)
 		}
 	}
 
