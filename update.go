@@ -162,14 +162,20 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusExpiry = time.Now().Add(3 * time.Second)
 		return m, nil
 
+	case fileOpenResultMsg:
+		// File open result (success or failure)
+		m.statusMsg = msg.message
+		m.statusExpiry = time.Now().Add(3 * time.Second)
+		return m, nil
+
 	case searchPartialMsg:
 		// Update progress status with drive info if available
 		m.scannedFiles = msg.count
 		if msg.drive != "" {
 			if msg.count > 0 {
-				m.statusMsg = fmt.Sprintf("Searching %s... %d files scanned", msg.drive, msg.count)
+				m.statusMsg = fmt.Sprintf("Searching %s %d files scanned", msg.drive, msg.count)
 			} else {
-				m.statusMsg = fmt.Sprintf("Searching %s...", msg.drive)
+				m.statusMsg = fmt.Sprintf("Searching %s", msg.drive)
 			}
 		} else {
 			m.statusMsg = fmt.Sprintf("Searching... %d files scanned", msg.count)
@@ -246,8 +252,32 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case modeSearch:
 				// Mouse click in search results
 				if len(m.filteredFiles) > 0 {
+					// Calculate visible height properly
+					availableHeight := m.height - uiOverhead
+					if availableHeight < 3 {
+						availableHeight = 3
+					}
+					contentHeight := availableHeight - 2
+					if contentHeight < 1 {
+						contentHeight = 1
+					}
+
+					// Account for scroll indicators
+					hasTopIndicator := m.scrollOffset > 0
+					hasBottomIndicator := m.scrollOffset+contentHeight < len(m.filteredFiles)
+					visibleItems := contentHeight
+					if hasTopIndicator {
+						visibleItems--
+					}
+					if hasBottomIndicator {
+						visibleItems--
+					}
+					if visibleItems < 1 {
+						visibleItems = 1
+					}
+
 					clickY := msg.Y - 3 // Adjust for header
-					if clickY >= 0 && clickY < len(m.filteredFiles)-m.scrollOffset {
+					if clickY >= 0 && clickY < visibleItems {
 						newCursor := m.scrollOffset + clickY
 						if newCursor >= 0 && newCursor < len(m.filteredFiles) {
 							// Check for double-click
@@ -269,6 +299,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 									}
 									// If locked, navigate into directory
 									if m.searchResultsLocked {
+										// Cancel any ongoing search
+										m.cancelCurrentSearch()
+										m.loading = false
 										m.addToHistory(selected.path)
 										m.currentDir = selected.path
 										m.cursor = 0
@@ -285,8 +318,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 										m.updatePreview()
 									}
 								} else {
-									// Open file
-									return m, m.openFile(selected.path)
+									// Open file with smart fallback
+									if m.currentSearchType == searchContent {
+										lineNum := int(selected.size)
+										return m, m.openExternalWithFallback(selected.path, lineNum)
+									}
+									return m, m.openExternalWithFallback(selected.path, 0)
 								}
 							} else {
 								// Single-click: select
@@ -302,8 +339,32 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case modeNormal:
 				// Mouse click in file list area
 				if len(m.filteredFiles) > 0 {
+					// Calculate visible height properly
+					availableHeight := m.height - uiOverhead
+					if availableHeight < 3 {
+						availableHeight = 3
+					}
+					contentHeight := availableHeight - 2
+					if contentHeight < 1 {
+						contentHeight = 1
+					}
+
+					// Account for scroll indicators
+					hasTopIndicator := m.scrollOffset > 0
+					hasBottomIndicator := m.scrollOffset+contentHeight < len(m.filteredFiles)
+					visibleItems := contentHeight
+					if hasTopIndicator {
+						visibleItems--
+					}
+					if hasBottomIndicator {
+						visibleItems--
+					}
+					if visibleItems < 1 {
+						visibleItems = 1
+					}
+
 					clickY := msg.Y - 3 // Adjust for header
-					if clickY >= 0 && clickY < len(m.filteredFiles)-m.scrollOffset {
+					if clickY >= 0 && clickY < visibleItems {
 						newCursor := m.scrollOffset + clickY
 						if newCursor >= 0 && newCursor < len(m.filteredFiles) {
 							// Check for double-click
@@ -348,8 +409,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 										}
 									}
 								} else {
-									// Open file with default application
-									return m, m.openFile(selected.path)
+									// Open file with smart fallback
+									if m.currentSearchType == searchContent {
+										lineNum := int(selected.size)
+										return m, m.openExternalWithFallback(selected.path, lineNum)
+									}
+									return m, m.openExternalWithFallback(selected.path, 0)
 								}
 							} else {
 								// Single-click: select and preview
@@ -451,6 +516,131 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								m.lastClickY = clickY
 								m.lastClickMode = modeBookmarks
 							}
+						}
+					}
+				}
+			}
+		}
+
+		// Handle middle-click navigation
+		if msg.Button == tea.MouseButtonMiddle && msg.Action == tea.MouseActionPress {
+			switch m.mode {
+			case modeSearch:
+				// Middle-click in search results - navigate to directory/parent
+				if len(m.filteredFiles) > 0 {
+					// Calculate visible height properly (same as left-click)
+					availableHeight := m.height - uiOverhead
+					if availableHeight < 3 {
+						availableHeight = 3
+					}
+					contentHeight := availableHeight - 2
+					if contentHeight < 1 {
+						contentHeight = 1
+					}
+
+					// Account for scroll indicators
+					hasTopIndicator := m.scrollOffset > 0
+					hasBottomIndicator := m.scrollOffset+contentHeight < len(m.filteredFiles)
+					visibleItems := contentHeight
+					if hasTopIndicator {
+						visibleItems--
+					}
+					if hasBottomIndicator {
+						visibleItems--
+					}
+					if visibleItems < 1 {
+						visibleItems = 1
+					}
+
+					clickY := msg.Y - 3 // Adjust for header
+					if clickY >= 0 && clickY < visibleItems {
+						clickedIndex := m.scrollOffset + clickY
+						if clickedIndex >= 0 && clickedIndex < len(m.filteredFiles) {
+							selected := m.filteredFiles[clickedIndex]
+							var targetDir string
+							if selected.isDir {
+								// Navigate to the directory
+								targetDir = selected.path
+							} else {
+								// Navigate to the parent directory
+								targetDir = filepath.Dir(selected.path)
+							}
+
+							// Cancel any ongoing search
+							m.cancelCurrentSearch()
+							m.loading = false
+							// Exit search mode and navigate
+							m.addToHistory(targetDir)
+							m.currentDir = targetDir
+							m.cursor = 0
+							m.scrollOffset = 0
+							m.previewScroll = 0
+							m.mode = modeNormal
+							m.searchResultsLocked = false
+							m.searchInput.SetValue("")
+							m.recursiveSearch = false
+							m.currentSearchType = searchFilename
+							m.loadFiles()
+							m.gitModified = git.GetModifiedFiles(m.currentDir)
+							m.gitBranch = git.GetBranch(m.currentDir)
+							m.updatePreview()
+							return m, nil
+						}
+					}
+				}
+
+			case modeNormal:
+				// Middle-click in normal mode - navigate to directory/parent
+				if len(m.filteredFiles) > 0 {
+					// Calculate visible height properly (same as left-click)
+					availableHeight := m.height - uiOverhead
+					if availableHeight < 3 {
+						availableHeight = 3
+					}
+					contentHeight := availableHeight - 2
+					if contentHeight < 1 {
+						contentHeight = 1
+					}
+
+					// Account for scroll indicators
+					hasTopIndicator := m.scrollOffset > 0
+					hasBottomIndicator := m.scrollOffset+contentHeight < len(m.filteredFiles)
+					visibleItems := contentHeight
+					if hasTopIndicator {
+						visibleItems--
+					}
+					if hasBottomIndicator {
+						visibleItems--
+					}
+					if visibleItems < 1 {
+						visibleItems = 1
+					}
+
+					clickY := msg.Y - 3 // Adjust for header
+					if clickY >= 0 && clickY < visibleItems {
+						clickedIndex := m.scrollOffset + clickY
+						if clickedIndex >= 0 && clickedIndex < len(m.filteredFiles) {
+							selected := m.filteredFiles[clickedIndex]
+							var targetDir string
+							if selected.isDir {
+								// Navigate to the directory
+								targetDir = selected.path
+							} else {
+								// Navigate to the parent directory
+								targetDir = filepath.Dir(selected.path)
+							}
+
+							// Navigate to the directory
+							m.addToHistory(targetDir)
+							m.currentDir = targetDir
+							m.cursor = 0
+							m.scrollOffset = 0
+							m.previewScroll = 0
+							m.loadFiles()
+							m.gitModified = git.GetModifiedFiles(m.currentDir)
+							m.gitBranch = git.GetBranch(m.currentDir)
+							m.updatePreview()
+							return m, nil
 						}
 					}
 				}
@@ -701,6 +891,63 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 				return m, nil
 
+			case ".":
+				// Toggle hidden files in search mode
+				m.showHidden = !m.showHidden
+				// Trigger a new search with the updated setting
+				currentQuery := m.searchInput.Value()
+				if currentQuery != "" {
+					filterCmd := m.updateFilter()
+					if m.showHidden {
+						m.statusMsg = "Showing hidden files"
+					} else {
+						m.statusMsg = "Hiding hidden files"
+					}
+					m.statusExpiry = time.Now().Add(2 * time.Second)
+					return m, filterCmd
+				}
+				if m.showHidden {
+					m.statusMsg = "Showing hidden files"
+				} else {
+					m.statusMsg = "Hiding hidden files"
+				}
+				m.statusExpiry = time.Now().Add(2 * time.Second)
+				return m, nil
+
+			case "f":
+				// F = Navigate to directory/parent in scout (like middle-click)
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					selected := m.filteredFiles[m.cursor]
+					if selected.name != ".." {
+						var targetDir string
+						if selected.isDir {
+							targetDir = selected.path
+						} else {
+							// Cancel any ongoing search
+							m.cancelCurrentSearch()
+							m.loading = false
+							targetDir = filepath.Dir(selected.path)
+						}
+
+						// Exit search mode and navigate
+						m.mode = modeNormal
+						m.searchResultsLocked = false
+						m.searchInput.SetValue("")
+						m.recursiveSearch = false
+						m.currentSearchType = searchFilename
+						m.addToHistory(targetDir)
+						m.currentDir = targetDir
+						m.cursor = 0
+						m.scrollOffset = 0
+						m.previewScroll = 0
+						m.loadFiles()
+						m.gitModified = git.GetModifiedFiles(m.currentDir)
+						m.gitBranch = git.GetBranch(m.currentDir)
+						m.updatePreview()
+					}
+				}
+				return m, nil
+
 			case "/":
 				// Start a fresh search - clear everything
 				m.searchResultsLocked = false
@@ -788,6 +1035,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 
 			case "enter":
+				// Cancel any ongoing search
+				m.cancelCurrentSearch()
+				m.loading = false
 				// If results are already locked, try to enter a directory
 				if m.searchResultsLocked {
 					if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
@@ -809,8 +1059,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.gitBranch = git.GetBranch(m.currentDir)
 							m.updatePreview()
 						} else if !selected.isDir {
-							// Open file
-							return m, m.openFile(selected.path)
+							// Open file with smart fallback
+							if m.currentSearchType == searchContent {
+								lineNum := int(selected.size) // Line number stored in size field
+								return m, m.openExternalWithFallback(selected.path, lineNum)
+							}
+							return m, m.openExternalWithFallback(selected.path, 0)
 						}
 					}
 					return m, nil
@@ -1031,7 +1285,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.gitModified = git.GetModifiedFiles(m.currentDir)
 						m.gitBranch = git.GetBranch(m.currentDir)
 					} else {
-						return m, m.openFile(selected.path)
+						// Files: smart fallback (try editor, then system default)
+						if m.currentSearchType == searchContent {
+							lineNum := int(selected.size) // Line number stored in size field
+							return m, m.openExternalWithFallback(selected.path, lineNum)
+						}
+						return m, m.openExternalWithFallback(selected.path, 0)
 					}
 				}
 
@@ -1090,26 +1349,49 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.copyPath(selected.path)
 				}
 
-			case "e":
+			case "f":
+				// F = Navigate to directory/parent in scout (like middle-click)
 				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 					selected := m.filteredFiles[m.cursor]
-					if !selected.isDir {
-						// If content search result, open at specific line
-						if m.mode == modeNormal && m.currentSearchType == searchContent {
-							lineNum := int(selected.size) // Line number stored in size field
-							return m, m.editFileAtLine(selected.path, lineNum)
+					if selected.name != ".." {
+						var targetDir string
+						if selected.isDir {
+							targetDir = selected.path
+						} else {
+							targetDir = filepath.Dir(selected.path)
 						}
-						return m, m.editFile(selected.path)
+
+						m.addToHistory(targetDir)
+						m.currentDir = targetDir
+						m.cursor = 0
+						m.scrollOffset = 0
+						m.previewScroll = 0
+						m.loadFiles()
+						m.gitModified = git.GetModifiedFiles(m.currentDir)
+						m.gitBranch = git.GetBranch(m.currentDir)
+						m.updatePreview()
 					}
 				}
 
 			case "o":
+				// O = Open externally (prefer editor/VS Code, fall back to system default)
 				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 					selected := m.filteredFiles[m.cursor]
-					if selected.isDir && selected.name != ".." {
+					if selected.name == ".." {
+						break
+					}
+
+					if selected.isDir {
+						// Directories: try VS Code, falls back to showing message if not installed
 						return m, m.openInVSCode(selected.path)
-					} else if !selected.isDir {
-						return m, m.openFile(selected.path)
+					} else {
+						// Files: try editor first (VS Code/vim/nano), fall back to system default
+						// If content search result, open at specific line
+						if m.currentSearchType == searchContent {
+							lineNum := int(selected.size) // Line number stored in size field
+							return m, m.openExternalWithFallback(selected.path, lineNum)
+						}
+						return m, m.openExternalWithFallback(selected.path, 0)
 					}
 				}
 

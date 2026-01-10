@@ -60,21 +60,11 @@ func (m *model) View() string {
 			rightPane := m.renderFileList(m.width / 2)
 			mainContent = lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 		} else if m.showPreview {
-			// Split view with preview - ensure both panels have same height
-			availableHeight := m.height - uiOverhead
-			if availableHeight < 3 {
-				availableHeight = 3
-			}
-			panelHeight := availableHeight + 2
-
+			// Split view with preview - panels already have height set internally
 			fileList := m.renderFileList(m.width / 2)
 			preview := m.renderPreview(m.width / 2)
 
-			// Force both panels to exact same height
-			fileListStyled := lipgloss.NewStyle().Height(panelHeight).Render(fileList)
-			previewStyled := lipgloss.NewStyle().Height(panelHeight).Render(preview)
-
-			mainContent = lipgloss.JoinHorizontal(lipgloss.Top, fileListStyled, previewStyled)
+			mainContent = lipgloss.JoinHorizontal(lipgloss.Top, fileList, preview)
 		} else {
 			// Full width file list
 			mainContent = m.renderFileList(m.width)
@@ -150,7 +140,7 @@ func (m model) renderHeader() string {
 		searchValue := m.searchInput.Value()
 		var hint string
 		if m.searchResultsLocked {
-			hint = " [LOCKED] (Enter: open folder | ESC: exit | /: new search)"
+			hint = " [🔒] (Enter: open folder | ESC: exit | /: new search)"
 		} else {
 			hint = " (Tab: cycle modes | ESC: clear/exit | Enter: lock results)"
 		}
@@ -221,9 +211,22 @@ func (m *model) renderStatusBar() string {
 	// Normal status bar
 	statusStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("255")).
-		Background(lipgloss.Color("240")).
+		Background(lipgloss.Color("235")).
 		Padding(0, 1).
 		Width(m.width)
+
+	// Style for purple numbers and keybinds (inline to avoid vertical stacking)
+	purpleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("99")).
+		Background(lipgloss.Color("235")).
+		Bold(true).
+		Inline(true)
+
+	// Style for white text values
+	whiteStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255")).
+		Background(lipgloss.Color("235")).
+		Inline(true)
 
 	var statusText string
 	var rightSide string
@@ -232,23 +235,22 @@ func (m *model) renderStatusBar() string {
 	if m.mode == modeBookmarks {
 		if len(m.sortedBookmarkPaths) > 0 && m.bookmarksCursor < len(m.sortedBookmarkPaths) {
 			// Show current bookmark path on left
-			statusText = m.sortedBookmarkPaths[m.bookmarksCursor]
+			statusText = whiteStyle.Render(m.sortedBookmarkPaths[m.bookmarksCursor])
 		} else {
-			statusText = "No bookmarks"
+			statusText = whiteStyle.Render("No bookmarks")
 		}
 		// Show keybinds on right
-		rightSide = "enter: open | o: VS Code | d: delete | esc: back"
+		rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": open | ") + purpleStyle.Render("o") + whiteStyle.Render(": VS Code | ") + purpleStyle.Render("d") + whiteStyle.Render(": delete | ") + purpleStyle.Render("esc") + whiteStyle.Render(": back")
 	} else {
 		// File count and position info
 		if len(m.filteredFiles) > 0 {
-			fileCountInfo := fmt.Sprintf("%d/%d", m.cursor+1, len(m.filteredFiles))
+			fileCountInfo := purpleStyle.Render(fmt.Sprintf("%d", m.cursor+1)) + whiteStyle.Render("/") + purpleStyle.Render(fmt.Sprintf("%d", len(m.filteredFiles)))
 			statusText = fileCountInfo
 		}
 
 		// Git info
 		if m.gitBranch != "" {
-			gitInfo := fmt.Sprintf(" | Branch: %s", m.gitBranch)
-			statusText += gitInfo
+			statusText += whiteStyle.Render(" | ") + purpleStyle.Render("Branch:") + whiteStyle.Render(" "+m.gitBranch)
 		}
 
 		// Clipboard info
@@ -257,21 +259,19 @@ func (m *model) renderStatusBar() string {
 			if m.clipboardOp == opCut {
 				opStr = "cut"
 			}
-			statusText += fmt.Sprintf(" | %d %s", len(m.clipboard), opStr)
+			statusText += whiteStyle.Render(" | ") + purpleStyle.Render(fmt.Sprintf("%d", len(m.clipboard))) + " " + whiteStyle.Render(opStr)
 		}
 
-		// Loading indicator
-		if m.loading {
+		// Status message (shows drive info during loading or other temporary messages)
+		if m.statusMsg != "" {
+			statusText += whiteStyle.Render(" | ") + whiteStyle.Render(m.statusMsg)
+		} else if m.loading {
+			// Fallback loading indicator if statusMsg is not set
 			if m.scannedFiles > 0 {
-				statusText += fmt.Sprintf(" | Searching... (%d files scanned)", m.scannedFiles)
+				statusText += whiteStyle.Render(" | ") + whiteStyle.Render("Searching... (") + purpleStyle.Render(fmt.Sprintf("%d", m.scannedFiles)) + whiteStyle.Render(" files scanned)")
 			} else {
-				statusText += " | Searching..."
+				statusText += whiteStyle.Render(" | Searching...")
 			}
-		}
-
-		// Status message (temporary) - skip if loading is already showing
-		if m.statusMsg != "" && !m.loading {
-			statusText += " | " + m.statusMsg
 		}
 
 		// Sort mode indicator (on left side)
@@ -281,10 +281,21 @@ func (m *model) renderStatusBar() string {
 			sortByDate: "Date",
 			sortByType: "Type",
 		}
-		statusText += fmt.Sprintf(" | Sort: %s (S)", sortNames[m.sortBy])
+		statusText += whiteStyle.Render(" | ") + purpleStyle.Render("Sort:") + whiteStyle.Render(" ") + whiteStyle.Render(sortNames[m.sortBy]) + whiteStyle.Render(" (") + purpleStyle.Render("S") + whiteStyle.Render(")")
 
-		// Help hint (on right side)
-		rightSide = "? for help"
+		// Dynamic hints based on selected item (on right side)
+		if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+			selected := m.filteredFiles[m.cursor]
+			if selected.name == ".." {
+				rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": back | ") + purpleStyle.Render("?") + whiteStyle.Render(" for help")
+			} else if selected.isDir {
+				rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": open | ") + purpleStyle.Render("o") + whiteStyle.Render(": VS Code | ") + purpleStyle.Render("?") + whiteStyle.Render(" for help")
+			} else {
+				rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": open | ") + purpleStyle.Render("o") + whiteStyle.Render(": editor | ") + purpleStyle.Render("f") + whiteStyle.Render(": parent dir | ") + purpleStyle.Render("?") + whiteStyle.Render(" for help")
+			}
+		} else {
+			rightSide = purpleStyle.Render("?") + whiteStyle.Render(" for help")
+		}
 	}
 
 	totalWidth := m.width - 2 // Account for padding
@@ -292,7 +303,7 @@ func (m *model) renderStatusBar() string {
 	if padding < 1 {
 		padding = 1
 	}
-	statusText += strings.Repeat(" ", padding) + rightSide
+	statusText += strings.Repeat(whiteStyle.Render(" "), padding) + rightSide
 
 	return statusStyle.Render(statusText)
 }
@@ -522,7 +533,8 @@ func (m *model) renderFileList(width int) string {
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Width(width - 2).
-		Height(availableHeight + 2)
+		Height(availableHeight + 2).
+		MaxHeight(availableHeight + 2)
 
 	combined := header + "\n" + fileList
 	return borderStyle.Render(combined)
@@ -555,7 +567,8 @@ func (m *model) renderPreview(width int) string {
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Width(width - 2).
-		Height(availableHeight + 2)
+		Height(availableHeight + 2).
+		MaxHeight(availableHeight + 2)
 
 	var content string
 	if len(m.previewLines) == 0 {
@@ -592,6 +605,13 @@ func (m *model) renderPreview(width int) string {
 		lines = append(lines, m.previewLines[startIdx:endIdx]...)
 		if hasBottomIndicator {
 			lines = append(lines, "▼")
+		}
+
+		// STRICT HEIGHT ENFORCEMENT: Ensure we never exceed contentHeight
+		// Reserve space for header + separator (2 lines total)
+		maxLines := availableHeight - 2
+		if len(lines) > maxLines {
+			lines = lines[:maxLines]
 		}
 
 		content = strings.Join(lines, "\n")
@@ -1013,6 +1033,8 @@ func (m model) renderHelpView() string {
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Move up", keyStyle.Render("k / ↑")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s           Enter directory / Open file", keyStyle.Render("enter / l / →")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Go to parent directory", keyStyle.Render("esc / h / ←")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Navigate to dir/parent (exit search)", keyStyle.Render("f")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s   Navigate to clicked dir/parent", keyStyle.Render("middle-click")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Go to top", keyStyle.Render("g")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Go to bottom", keyStyle.Render("G")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s       Half-page down", keyStyle.Render("ctrl+d")))
@@ -1031,8 +1053,7 @@ func (m model) renderHelpView() string {
 
 	// File Operations section
 	allHelpContent = append(allHelpContent, sectionStyle.Render("File Operations:"))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Open file", keyStyle.Render("o")))
-	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Edit file", keyStyle.Render("e")))
+	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Open in editor/VS Code (fallback to default)", keyStyle.Render("o")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Rename file/directory", keyStyle.Render("R")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Delete file/directory", keyStyle.Render("D")))
 	allHelpContent = append(allHelpContent, fmt.Sprintf("  %s             Create new file", keyStyle.Render("N")))

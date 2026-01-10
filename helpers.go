@@ -18,8 +18,12 @@ import (
 
 func (m *model) openFile(path string) tea.Cmd {
 	return func() tea.Msg {
+		filename := filepath.Base(path)
+
 		// Try to open with default application
 		var cmd *exec.Cmd
+		var foundEditor bool
+
 		switch {
 		case utils.IsCodeFile(path):
 			// Try VS Code first, then fall back to other editors
@@ -27,20 +31,51 @@ func (m *model) openFile(path string) tea.Cmd {
 			for _, editor := range editors {
 				if _, err := exec.LookPath(editor); err == nil {
 					cmd = exec.Command(editor, path)
+					foundEditor = true
 					break
+				}
+			}
+			if !foundEditor {
+				// No editor found
+				return fileOpenResultMsg{
+					success: false,
+					message: fmt.Sprintf("Can't open %s via scout", filename),
+					path:    path,
 				}
 			}
 		default:
 			// Use system default opener (handles Linux/macOS/Windows automatically)
-			open.Run(path)
-			return nil
+			err := open.Run(path)
+			if err != nil {
+				return fileOpenResultMsg{
+					success: false,
+					message: fmt.Sprintf("Can't open %s via scout", filename),
+					path:    path,
+				}
+			}
+			return fileOpenResultMsg{
+				success: true,
+				message: fmt.Sprintf("Opened %s", filename),
+				path:    path,
+			}
 		}
 
 		if cmd != nil {
-			cmd.Start()
+			err := cmd.Start()
+			if err != nil {
+				return fileOpenResultMsg{
+					success: false,
+					message: fmt.Sprintf("Can't open %s via scout", filename),
+					path:    path,
+				}
+			}
 		}
 
-		return nil
+		return fileOpenResultMsg{
+			success: true,
+			message: fmt.Sprintf("Opened %s", filename),
+			path:    path,
+		}
 	}
 }
 
@@ -100,6 +135,59 @@ func (m *model) openInVSCode(path string) tea.Cmd {
 		}
 
 		return nil
+	}
+}
+
+func (m *model) openExternalWithFallback(path string, line int) tea.Cmd {
+	return func() tea.Msg {
+		filename := filepath.Base(path)
+
+		// Try editors first (VS Code, vim, nano)
+		editors := []string{"code", "vim", "nano", "vi"}
+		for _, editor := range editors {
+			if _, err := exec.LookPath(editor); err == nil {
+				var cmd *exec.Cmd
+				if line > 0 {
+					// Open at specific line based on editor
+					switch editor {
+					case "code":
+						cmd = exec.Command(editor, "-g", fmt.Sprintf("%s:%d", path, line))
+					case "vim", "vi", "nvim":
+						cmd = exec.Command(editor, fmt.Sprintf("+%d", line), path)
+					case "nano":
+						cmd = exec.Command(editor, fmt.Sprintf("+%d", line), path)
+					default:
+						cmd = exec.Command(editor, path)
+					}
+				} else {
+					cmd = exec.Command(editor, path)
+				}
+
+				err := cmd.Start()
+				if err == nil {
+					return fileOpenResultMsg{
+						success: true,
+						message: fmt.Sprintf("Opened %s in %s", filename, editor),
+						path:    path,
+					}
+				}
+			}
+		}
+
+		// No editor found - fall back to system default opener
+		err := open.Run(path)
+		if err != nil {
+			return fileOpenResultMsg{
+				success: false,
+				message: fmt.Sprintf("Can't open %s via scout", filename),
+				path:    path,
+			}
+		}
+		return fileOpenResultMsg{
+			success: true,
+			message: fmt.Sprintf("Opened %s", filename),
+			path:    path,
+		}
 	}
 }
 
