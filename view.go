@@ -123,7 +123,7 @@ func (m model) renderHeader() string {
 			if m.recursiveSearch {
 				searchMode = "RECURSIVE SEARCH"
 			} else {
-				searchMode = "FILE SEARCH"
+				searchMode = "CURRENT DIR SEARCH"
 			}
 		default:
 			searchMode = "FILE SEARCH"
@@ -255,6 +255,9 @@ func (m *model) renderStatusBar() string {
 		if len(m.filteredFiles) > 0 {
 			fileCountInfo := purpleStyle.Render(fmt.Sprintf("%d", m.cursor+1)) + whiteStyle.Render("/") + purpleStyle.Render(fmt.Sprintf("%d", len(m.filteredFiles)))
 			statusText = fileCountInfo
+		} else {
+			fileCountInfo := purpleStyle.Render("0") + whiteStyle.Render("/") + purpleStyle.Render("0")
+			statusText = fileCountInfo
 		}
 
 		// Git info
@@ -291,7 +294,7 @@ func (m *model) renderStatusBar() string {
 			sortByDate: "date",
 			sortByType: "type",
 		}
-		statusText += whiteStyle.Render(" | ") + purpleStyle.Render("sort:") + whiteStyle.Render(" ") + whiteStyle.Render(sortNames[m.sortBy]) + whiteStyle.Render(" (") + purpleStyle.Render("s") + whiteStyle.Render(")")
+		statusText += whiteStyle.Render(" | ") + purpleStyle.Render("sort:") + whiteStyle.Render(" ") + whiteStyle.Render(sortNames[m.sortBy]) + whiteStyle.Render(" (") + purpleStyle.Render("S") + whiteStyle.Render(")")
 
 		// Dynamic hints based on selected item (on right side)
 		if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
@@ -342,19 +345,19 @@ func (m *model) renderFileList(width int) string {
 	if m.mode == modeSearch {
 		switch m.currentSearchType {
 		case searchUltra:
-			searchModeIndicator = " [ULTRA]"
+			searchModeIndicator = " [ULTRA SEARCH]"
 		case searchContent:
-			searchModeIndicator = " [CONTENT]"
+			searchModeIndicator = " [CONTENT SEARCH]"
 		case searchRecursive:
-			searchModeIndicator = " [RECURSIVE]"
+			searchModeIndicator = " [RECURSIVE SEARCH]"
 		case searchFilename:
 			if m.recursiveSearch {
-				searchModeIndicator = " [RECURSIVE]"
+				searchModeIndicator = " [RECURSIVE SEARCH]"
 			} else {
-				searchModeIndicator = " [CURRENT DIR]"
+				searchModeIndicator = " [CURRENT DIR SEARCH]"
 			}
 		default:
-			searchModeIndicator = " [CURRENT DIR]"
+			searchModeIndicator = " [CURRENT DIR SEARCH]"
 		}
 	}
 
