@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/LFroesch/scout/internal/config"
 	"github.com/LFroesch/scout/internal/fileops"
@@ -116,17 +117,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Show current result count
 			resultCount := len(m.filteredFiles)
+			orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+			purpleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+			whiteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("235")).Inline(true)
+
 			if resultCount > 5000 {
-				m.statusMsg = fmt.Sprintf("Found %d files so far (search continues...)", resultCount)
+				m.statusMsg = whiteStyle.Render("found ") + purpleStyle.Render(fmt.Sprintf("%d", resultCount)) + whiteStyle.Render(" files so far (") + orangeStyle.Render("search continues...") + whiteStyle.Render(")")
 			} else {
-				m.statusMsg = fmt.Sprintf("Found %d files (searching...)", resultCount)
+				m.statusMsg = whiteStyle.Render("found ") + purpleStyle.Render(fmt.Sprintf("%d", resultCount)) + whiteStyle.Render(" files (") + orangeStyle.Render("searching...") + whiteStyle.Render(")")
 			}
 
-			// Reset cursor if needed
-			if m.cursor >= len(m.filteredFiles) {
-				m.cursor = 0
-			}
-			m.scrollOffset = 0
+			// Ensure cursor is valid after search results update
+			m.ensureCursorInBounds()
 			m.updatePreview()
 
 			// Keep listening for more results
@@ -144,10 +146,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Update status with final count
 		if len(m.filteredFiles) > 0 {
+			orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+			purpleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+			whiteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("235")).Inline(true)
+
 			if len(m.filteredFiles) > 5000 {
-				m.statusMsg = fmt.Sprintf("Search complete: %d files (large result set)", len(m.filteredFiles))
+				m.statusMsg = orangeStyle.Render("search ") + whiteStyle.Render("complete: ") + purpleStyle.Render(fmt.Sprintf("%d", len(m.filteredFiles))) + whiteStyle.Render(" files (large result set)")
 			} else {
-				m.statusMsg = fmt.Sprintf("Search complete: %d files", len(m.filteredFiles))
+				m.statusMsg = orangeStyle.Render("search ") + whiteStyle.Render("complete: ") + purpleStyle.Render(fmt.Sprintf("%d", len(m.filteredFiles))) + whiteStyle.Render(" files")
 			}
 			m.statusExpiry = time.Now().Add(3 * time.Second)
 		}
@@ -158,7 +164,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searchInProgress = false
 		m.loading = false
 		m.searchResultChan = nil // Stop listening for more messages
-		m.statusMsg = fmt.Sprintf("Search error: %v", msg.err)
+		m.statusMsg = fmt.Sprintf("search error: %v", msg.err)
 		m.statusExpiry = time.Now().Add(3 * time.Second)
 		return m, nil
 
@@ -171,14 +177,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case searchPartialMsg:
 		// Update progress status with drive info if available
 		m.scannedFiles = msg.count
+		orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+		purpleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+		whiteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("235")).Inline(true)
+
 		if msg.drive != "" {
 			if msg.count > 0 {
-				m.statusMsg = fmt.Sprintf("Searching %s %d files scanned", msg.drive, msg.count)
+				m.statusMsg = orangeStyle.Render("searching ") + whiteStyle.Render(msg.drive+" ") + purpleStyle.Render(fmt.Sprintf("%d", msg.count)) + whiteStyle.Render(" files scanned")
 			} else {
-				m.statusMsg = fmt.Sprintf("Searching %s", msg.drive)
+				m.statusMsg = orangeStyle.Render("searching ") + whiteStyle.Render(msg.drive)
 			}
 		} else {
-			m.statusMsg = fmt.Sprintf("Searching... %d files scanned", msg.count)
+			m.statusMsg = orangeStyle.Render("searching... ") + purpleStyle.Render(fmt.Sprintf("%d", msg.count)) + whiteStyle.Render(" files scanned")
 		}
 		// Keep listening for more messages
 		if m.searchResultChan != nil {
@@ -505,7 +515,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 									m.updatePreview()
 									// Save config immediately after bookmark navigation to persist frecency
 									if err := config.Save(m.config); err != nil {
-										m.showError("Config Save Failed", fmt.Sprintf("Failed to save config: %v", err))
+										m.showError("CONFIG SAVE FAILED", fmt.Sprintf("failed to save config: %v", err))
 									}
 									return m, nil
 								}
@@ -656,7 +666,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case modeBookmarks:
 			switch msg.String() {
-			case "esc", "q":
+			case "ctrl+c", "esc", "q":
 				m.mode = modeNormal
 				return m, nil
 			case "j", "down":
@@ -683,7 +693,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.gitBranch = git.GetBranch(m.currentDir)
 						// Save config immediately after bookmark navigation to persist frecency
 						if err := config.Save(m.config); err != nil {
-							m.showError("Config Save Failed", fmt.Sprintf("Failed to save config: %v", err))
+							m.showError("CONFIG SAVE FAILED", fmt.Sprintf("failed to save config: %v", err))
 						}
 					}
 				}
@@ -726,14 +736,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.bookmarksCursor = len(m.sortedBookmarkPaths) - 1
 					}
 					if err := config.Save(m.config); err != nil {
-						m.showError("Config Save Failed", fmt.Sprintf("Failed to save config: %v", err))
+						m.showError("CONFIG SAVE FAILED", fmt.Sprintf("failed to save config: %v", err))
 					}
-					m.statusMsg = fmt.Sprintf("Deleted bookmark: %s", bookmarkName)
+					m.statusMsg = fmt.Sprintf("deleted bookmark: %s", bookmarkName)
 					m.statusExpiry = time.Now().Add(2 * time.Second)
 				}
 				m.mode = modeBookmarks
 				return m, nil
-			case "n", "N", "esc":
+			case "ctrl+c", "n", "N", "esc":
 				// Cancelled
 				m.mode = modeBookmarks
 				return m, nil
@@ -761,18 +771,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Try to move to trash (which we can potentially restore)
 					trashPath, err := fileops.DeleteWithUndo(selected.path, selected.isDir)
 					if err != nil {
-						m.showError("Delete Failed", err.Error())
+						m.showError("DELETE FAILED", err.Error())
 					} else {
 						undoEntry.trashPath = trashPath
 						m.addToUndo(undoEntry)
-						m.statusMsg = fmt.Sprintf("Deleted: %s (press 'u' to undo)", selected.name)
+						m.statusMsg = fmt.Sprintf("deleted: %s (press 'u' to undo)", selected.name)
 						m.statusExpiry = time.Now().Add(3 * time.Second)
 						m.loadFiles()
 					}
 				}
 				m.mode = modeNormal
 				return m, nil
-			case "n", "N", "esc":
+			case "ctrl+c", "n", "N", "esc":
 				m.mode = modeNormal
 				return m, nil
 			}
@@ -780,7 +790,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case modeRename:
 			switch msg.String() {
-			case "esc":
+			case "ctrl+c", "esc":
 				m.mode = modeNormal
 				m.textInput.SetValue("")
 				return m, nil
@@ -789,9 +799,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if newName != "" && len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 					selected := m.filteredFiles[m.cursor]
 					if err := m.renameFile(selected.path, newName); err != nil {
-						m.showError("Rename Failed", err.Error())
+						m.showError("RENAME FAILED", err.Error())
 					} else {
-						m.statusMsg = fmt.Sprintf("Renamed to: %s", newName)
+						m.statusMsg = fmt.Sprintf("renamed to: %s", newName)
 						m.statusExpiry = time.Now().Add(2 * time.Second)
 						m.loadFiles()
 					}
@@ -806,7 +816,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case modeCreateFile:
 			switch msg.String() {
-			case "esc":
+			case "ctrl+c", "esc":
 				m.mode = modeNormal
 				m.textInput.SetValue("")
 				return m, nil
@@ -814,9 +824,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				name := m.textInput.Value()
 				if name != "" {
 					if err := m.createFile(name); err != nil {
-						m.showError("Create File Failed", err.Error())
+						m.showError("CREATE FILE FAILED", err.Error())
 					} else {
-						m.statusMsg = fmt.Sprintf("Created file: %s", name)
+						m.statusMsg = fmt.Sprintf("created file: %s", name)
 						m.statusExpiry = time.Now().Add(2 * time.Second)
 						m.loadFiles()
 					}
@@ -831,7 +841,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case modeCreateDir:
 			switch msg.String() {
-			case "esc":
+			case "ctrl+c", "esc":
 				m.mode = modeNormal
 				m.textInput.SetValue("")
 				return m, nil
@@ -839,9 +849,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				name := m.textInput.Value()
 				if name != "" {
 					if err := m.createDir(name); err != nil {
-						m.showError("Create Directory Failed", err.Error())
+						m.showError("CREATE DIRECTORY FAILED", err.Error())
 					} else {
-						m.statusMsg = fmt.Sprintf("Created directory: %s", name)
+						m.statusMsg = fmt.Sprintf("created directory: %s", name)
 						m.statusExpiry = time.Now().Add(2 * time.Second)
 						m.loadFiles()
 					}
@@ -856,7 +866,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case modeHelp:
 			switch msg.String() {
-			case "esc", "?":
+			case "ctrl+c", "esc", "?":
 				m.mode = modeNormal
 				m.helpScroll = 0
 				return m, nil
@@ -876,18 +886,34 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case modeSearch:
 			switch msg.String() {
+			case "ctrl+c":
+				// Ctrl+C: Force exit search mode (more aggressive than ESC)
+				m.cancelCurrentSearch()
+				m.loading = false
+				m.searchResultsLocked = false
+				m.searchInput.SetValue("")
+				m.filteredFiles = m.files
+				m.searchMatches = [][]int{}
+				m.cursor = 0
+				m.scrollOffset = 0
+				m.mode = modeNormal
+				m.recursiveSearch = false
+				m.currentSearchType = searchFilename
+				m.updatePreview()
+				return m, nil
+
 			case "S":
 				// Cycle through sort modes for search results
 				m.sortBy = (m.sortBy + 1) % 4
 				// Re-sort the filtered files
 				m.sortSearchResults()
 				sortNames := map[sortMode]string{
-					sortByName: "Name",
-					sortBySize: "Size",
-					sortByDate: "Date",
-					sortByType: "Type",
+					sortByName: "name",
+					sortBySize: "size",
+					sortByDate: "date",
+					sortByType: "type",
 				}
-				m.statusMsg = fmt.Sprintf("Sorted by: %s", sortNames[m.sortBy])
+				m.statusMsg = fmt.Sprintf("sorted by: %s", sortNames[m.sortBy])
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 				return m, nil
 
@@ -896,20 +922,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHidden = !m.showHidden
 				// Trigger a new search with the updated setting
 				currentQuery := m.searchInput.Value()
+				whiteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("235")).Inline(true)
 				if currentQuery != "" {
 					filterCmd := m.updateFilter()
 					if m.showHidden {
-						m.statusMsg = "Showing hidden files"
+						m.statusMsg = whiteStyle.Render("showing hidden files")
 					} else {
-						m.statusMsg = "Hiding hidden files"
+						m.statusMsg = whiteStyle.Render("hiding hidden files")
 					}
 					m.statusExpiry = time.Now().Add(2 * time.Second)
 					return m, filterCmd
 				}
 				if m.showHidden {
-					m.statusMsg = "Showing hidden files"
+					m.statusMsg = whiteStyle.Render("showing hidden files")
 				} else {
-					m.statusMsg = "Hiding hidden files"
+					m.statusMsg = whiteStyle.Render("hiding hidden files")
 				}
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 				return m, nil
@@ -935,6 +962,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.searchInput.SetValue("")
 						m.recursiveSearch = false
 						m.currentSearchType = searchFilename
+
+						// Show "exited search" status
+						orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+						m.statusMsg = orangeStyle.Render("exited search")
+						m.statusExpiry = time.Now().Add(2 * time.Second)
+
 						m.addToHistory(targetDir)
 						m.currentDir = targetDir
 						m.cursor = 0
@@ -981,6 +1014,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.mode = modeNormal
 					m.recursiveSearch = false
 					m.currentSearchType = searchFilename
+
+					// Show "exited search" status
+					orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+					m.statusMsg = orangeStyle.Render("exited search")
+					m.statusExpiry = time.Now().Add(2 * time.Second)
+
 					m.updatePreview()
 					return m, nil
 				}
@@ -1000,6 +1039,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.recursiveSearch = false
 					m.currentSearchType = searchFilename
 					m.loading = false
+
+					// Show "exited search" status
+					orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+					m.statusMsg = orangeStyle.Render("exited search")
+					m.statusExpiry = time.Now().Add(2 * time.Second)
 				}
 				return m, nil
 
@@ -1020,6 +1064,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.mode = modeNormal
 					m.recursiveSearch = false
 					m.currentSearchType = searchFilename
+
+					// Show "exited search" status
+					orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+					m.statusMsg = orangeStyle.Render("exited search")
+					m.statusExpiry = time.Now().Add(2 * time.Second)
+
 					m.updatePreview()
 					return m, nil
 				}
@@ -1087,28 +1137,28 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if !m.recursiveSearch {
 						// Mode 1 -> Mode 2: Current Dir -> Recursive
 						m.recursiveSearch = true
-						m.statusMsg = "Recursive file search"
+						m.statusMsg = "recursive file search"
 					} else {
 						// Mode 2 -> Mode 3: Recursive -> Content
 						m.currentSearchType = searchContent
 						m.recursiveSearch = false
-						m.statusMsg = "Content search"
+						m.statusMsg = "content search"
 					}
 				case searchContent:
 					// Mode 3 -> Mode 4: Content -> Ultra
 					m.currentSearchType = searchUltra
 					m.recursiveSearch = false
-					m.statusMsg = "Ultra search (all drives)"
+					m.statusMsg = "ultra search (all drives)"
 				case searchUltra:
 					// Mode 4 -> Mode 1: Ultra -> Current Dir
 					m.currentSearchType = searchFilename
 					m.recursiveSearch = false
-					m.statusMsg = "Current directory file search"
+					m.statusMsg = "current directory file search"
 				default:
 					// Fallback: reset to current dir
 					m.currentSearchType = searchFilename
 					m.recursiveSearch = false
-					m.statusMsg = "Current directory file search"
+					m.statusMsg = "current directory file search"
 				}
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 				cmd = m.updateFilter()
@@ -1271,7 +1321,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if selected.name == ".." {
 							homeDir, _ := os.UserHomeDir()
 							if strings.HasPrefix(m.currentDir, homeDir) && !strings.HasPrefix(selected.path, homeDir) {
-								m.statusMsg = "Cannot navigate above home directory (use ` to jump to Windows C:)"
+								m.statusMsg = "cannot navigate above home directory (use ` to jump to windows c:)"
 								m.statusExpiry = time.Now().Add(3 * time.Second)
 								break
 							}
@@ -1300,7 +1350,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Prevent backing out of WSL home directory
 				homeDir, _ := os.UserHomeDir()
 				if strings.HasPrefix(m.currentDir, homeDir) && !strings.HasPrefix(parentDir, homeDir) {
-					m.statusMsg = "Cannot navigate above home directory (use ` to jump to Windows C:)"
+					m.statusMsg = "cannot navigate above home directory (use ` to jump to windows c:)"
 					m.statusExpiry = time.Now().Add(3 * time.Second)
 					break
 				}
@@ -1337,9 +1387,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHidden = !m.showHidden
 				m.loadFiles()
 				if m.showHidden {
-					m.statusMsg = "Showing hidden files"
+					m.statusMsg = "showing hidden files"
 				} else {
-					m.statusMsg = "Hiding hidden files"
+					m.statusMsg = "hiding hidden files"
 				}
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 
@@ -1399,7 +1449,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loadFiles()
 				m.gitModified = git.GetModifiedFiles(m.currentDir)
 				m.gitBranch = git.GetBranch(m.currentDir)
-				m.statusMsg = "Refreshed"
+				m.statusMsg = "refreshed"
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 
 			case "~":
@@ -1439,16 +1489,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if !utils.Contains(m.config.Bookmarks, selected.path) {
 							m.config.Bookmarks = append(m.config.Bookmarks, selected.path)
 							if err := config.Save(m.config); err != nil {
-								m.showError("Config Save Failed", fmt.Sprintf("Failed to save config: %v", err))
+								m.showError("CONFIG SAVE FAILED", fmt.Sprintf("failed to save config: %v", err))
 							}
-							m.statusMsg = fmt.Sprintf("Bookmark added: %s", selected.name)
+							m.statusMsg = fmt.Sprintf("bookmark added: %s", selected.name)
 							m.statusExpiry = time.Now().Add(2 * time.Second)
 						} else {
-							m.statusMsg = "Already bookmarked"
+							m.statusMsg = "already bookmarked"
 							m.statusExpiry = time.Now().Add(2 * time.Second)
 						}
 					} else {
-						m.statusMsg = "Can only bookmark directories"
+						m.statusMsg = "can only bookmark directories"
 						m.statusExpiry = time.Now().Add(2 * time.Second)
 					}
 				}
@@ -1504,7 +1554,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if current.name != ".." {
 						m.clipboard = []string{current.path}
 						m.clipboardOp = opCopy
-						m.statusMsg = fmt.Sprintf("Copied: %s", current.name)
+						m.statusMsg = fmt.Sprintf("copied: %s", current.name)
 						m.statusExpiry = time.Now().Add(2 * time.Second)
 					}
 				}
@@ -1516,7 +1566,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if current.name != ".." {
 						m.clipboard = []string{current.path}
 						m.clipboardOp = opCut
-						m.statusMsg = fmt.Sprintf("Cut: %s", current.name)
+						m.statusMsg = fmt.Sprintf("cut: %s", current.name)
 						m.statusExpiry = time.Now().Add(2 * time.Second)
 					}
 				}
@@ -1535,9 +1585,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 					if err != nil {
-						m.showError("Paste Failed", err.Error())
+						m.showError("PASTE FAILED", err.Error())
 					} else {
-						m.statusMsg = "Pasted successfully"
+						m.statusMsg = "pasted successfully"
 						m.statusExpiry = time.Now().Add(2 * time.Second)
 						m.loadFiles()
 					}
@@ -1552,15 +1602,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if lastUndo.operation == "delete" && lastUndo.trashPath != "" {
 						// Try to restore from trash
 						if err := fileops.RestoreFromTrash(lastUndo.trashPath, lastUndo.path); err != nil {
-							m.showError("Undo Failed", fmt.Sprintf("Could not restore %s: %v", filepath.Base(lastUndo.path), err))
+							m.showError("UNDO FAILED", fmt.Sprintf("could not restore %s: %v", filepath.Base(lastUndo.path), err))
 						} else {
-							m.statusMsg = fmt.Sprintf("Restored: %s", filepath.Base(lastUndo.path))
+							m.statusMsg = fmt.Sprintf("restored: %s", filepath.Base(lastUndo.path))
 							m.statusExpiry = time.Now().Add(2 * time.Second)
 							m.loadFiles()
 						}
 					}
 				} else {
-					m.statusMsg = "Nothing to undo"
+					m.statusMsg = "nothing to undo"
 					m.statusExpiry = time.Now().Add(2 * time.Second)
 				}
 
@@ -1577,7 +1627,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Open config file in editor
 				configPath, err := config.GetConfigPath()
 				if err != nil {
-					m.statusMsg = fmt.Sprintf("Error: cannot get config path: %v", err)
+					m.statusMsg = fmt.Sprintf("error: cannot get config path: %v", err)
 					m.statusExpiry = time.Now().Add(3 * time.Second)
 					return m, nil
 				}

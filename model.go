@@ -277,7 +277,7 @@ func initialModel() model {
 func (m *model) loadFiles() {
 	entries, err := os.ReadDir(m.currentDir)
 	if err != nil {
-		m.showError("Cannot Read Directory", fmt.Sprintf("Failed to read %s: %v", filepath.Base(m.currentDir), err))
+		m.showError("CANNOT READ DIRECTORY", fmt.Sprintf("failed to read %s: %v", filepath.Base(m.currentDir), err))
 		return
 	}
 
@@ -363,6 +363,7 @@ func (m *model) loadFiles() {
 	m.sortFiles()
 
 	m.filteredFiles = m.files
+	m.ensureCursorInBounds() // Ensure cursor is valid after loading new files
 	m.updatePreview()
 
 	// Update frecency when visiting a directory
@@ -538,7 +539,9 @@ func (m *model) updateFilter() tea.Cmd {
 		m.currentSearchType == searchUltra ||
 		m.recursiveSearch
 	if len(query) < minSearchChars && isExpensiveSearch {
-		m.statusMsg = fmt.Sprintf("Type at least %d characters to search", minSearchChars)
+		whiteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("235")).Inline(true)
+		purpleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+		m.statusMsg = whiteStyle.Render("type at least ") + purpleStyle.Render(fmt.Sprintf("%d", minSearchChars)) + whiteStyle.Render(" characters to search")
 		m.statusExpiry = time.Now().Add(2 * time.Second)
 		m.cancelCurrentSearch()
 		m.loading = false
@@ -553,13 +556,11 @@ func (m *model) updateFilter() tea.Cmd {
 
 	// For simple current directory search, still do it synchronously (it's fast)
 	m.searchCurrentDir(query)
-	m.statusMsg = fmt.Sprintf("Found %d files", len(m.filteredFiles))
+	m.statusMsg = fmt.Sprintf("found %d files", len(m.filteredFiles))
 	m.statusExpiry = time.Now().Add(3 * time.Second)
 
-	// Reset cursor if it's out of bounds
-	if m.cursor >= len(m.filteredFiles) {
-		m.cursor = 0
-	}
+	// Ensure cursor is valid after filtering
+	m.ensureCursorInBounds()
 	return nil
 }
 
@@ -995,7 +996,7 @@ func (m *model) previewDirectory(path string) string {
 		if entry.IsDir() {
 			icon = "📁"
 		} else if utils.IsImageFile(entry.Name()) {
-			icon = "🖼️"
+			icon = "📸"
 		} else if utils.IsCodeFile(entry.Name()) {
 			icon = "📝"
 		}

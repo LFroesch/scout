@@ -231,7 +231,7 @@ Scout uses intuitive icons for different file types:
 - 📁 Directories
 - And many more...
 
-## Smart Filtering
+## Smart Filtering⬆
 
 Scout automatically hides common development artifacts:
 - `node_modules`
