@@ -2,16 +2,12 @@
 
 ## Current Tasks
 
-## Minor
-
-- ensure you can click on the path links in preview while in terminal
-- update readme
-
 ## Medium
 
-- binary check not working?
-- Caching whatever we can cleanly
+- show date on file window? search window too?
+- git [M] stops the cursor bar background
 - Add bookmark pinning/favoriting system (quick dial integration with frecency) split panel? quick dial one side, frecent on other? more columns? idk
+- make double ? right click ? work like o/enter
 
 ## Prior to Launch
 
@@ -46,6 +42,30 @@
 - Demo GIF and comparison section in README
 
 ## DevLog
+
+### 2026-01-13 - Search Cancellation Race Condition Fix
+- **Fixed premature search cancellation**: Removed cancelCurrentSearch() from Enter key handler - pressing Enter now only locks results without stopping the search
+- **Background search continues**: Search continues running in background after pressing Enter, allowing results to stream in while navigating/scrolling
+- **Explicit exit only**: Search now only cancels on explicit actions (ESC, q, Ctrl+C, "/") or when navigating away from search mode
+- **Resolved race condition**: Fixed issue where rapidly hitting Enter then scrolling/copying would cancel searches before completion
+
+### 2026-01-13 - Search Mode Command Key Fix
+- **All commands require locked results**: Fixed all command keys (w/s/y/o/S/./f) to only trigger actions when search results are locked (press Enter to lock)
+- **Preview scrolling in search**: w/s and alt+up/alt+down scroll preview when locked
+- **Open file in search**: o opens file/directory in editor/VS Code when locked
+- **Path copy in search**: y copies selected file path when locked
+- **Sort in search**: S cycles sort modes when locked
+- **Toggle hidden in search**: . toggles hidden files when locked
+- **Navigate in search**: f navigates to directory/parent when locked
+- **Type any character while searching**: All these keys can be typed in search query when not locked (e.g., search for "open", "filter", "SYSTEM", ".bashrc", "windows")
+
+### 2026-01-13 - File Type System Overhaul & Performance Caching
+- **Refactored binary detection**: Removed confusing greylist, implemented industry-standard file type categorization (Text, Code, Media, Document, Archive, Database, Font, Executable, Unknown)
+- **Smart file categorization**: Extension-based detection with content fallback for unknown types - fixed bugs where .h/.ini were misclassified
+- **Enhanced preview messages**: Different messages for each file type (media, documents, archives, fonts) instead of generic "binary file"
+- **Preview caching**: LRU cache (50 files) stores file content with mod-time validation - instant re-display when revisiting files
+- **Git status caching**: 5-second TTL cache for git modified/branch status - reduces redundant git calls
+- **Performance**: Cached previews + git status = smoother navigation, especially in git repos with many files
 
 ### 2026-01-13 - Cursor Visibility Fix (Filtering & Toggling Hidden Files)
 - **Fixed cursor disappearing after filter operations**: Cursor now properly moves to last valid item when list shrinks (e.g., cursor at index 10, filtered list has 5 items → cursor moves to item 4)

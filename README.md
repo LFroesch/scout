@@ -181,13 +181,17 @@ Scout stores its configuration in `~/.config/scout/scout-config.json`:
 
 ## File Preview
 
-Scout automatically previews:
-- **Text files** - Full content with text wrapping and scrolling support
+Scout intelligently categorizes and previews files:
+- **Text & Code files** - Full content with syntax-aware detection and scrolling support
 - **Directories** - Lists contents with file count and icons
-- **Images** - Shows file info (no image preview)
-- **Binary files** - Shows file size and type only
+- **Media files** (images, video, audio) - Shows file metadata and type
+- **Documents** (PDF, Office files) - Indicates external viewer required
+- **Archives** (zip, tar, etc.) - Shows archive type and size
+- **Databases** (sqlite, db files) - Identifies as binary database
+- **Fonts** - Detects font files (.ttf, .woff, etc.)
+- **Executables** - Identifies compiled binaries and bytecode
 
-Large files (>1MB) and binary files are not previewed for performance.
+Large files (>1MB) are not previewed for performance. Preview content is cached (LRU, 50 files) for instant re-display.
 
 ### Preview Navigation
 - Use **`]`** and **`[`** to scroll through long file contents
@@ -252,7 +256,8 @@ Scout is designed to be fast:
 - **Efficient file system traversal** using Go's stdlib optimizations
 - **Minimal memory footprint** - lightweight and fast even on older hardware
 - **Responsive** even in large directories (thousands of files)
-- **Smart caching** of file metadata and git status
+- **Smart caching** - LRU preview cache (50 files) and git status cache (5s TTL)
+- **Optimized binary detection** - extension-based categorization with content fallback
 - **Automatic terminal size adaptation** for any screen size
 
 ## Examples

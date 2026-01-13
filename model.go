@@ -44,20 +44,22 @@ type fileOpenResultMsg struct {
 
 // Terminal dimension constants
 const (
-	minTerminalWidth  = 60  // Minimum usable width
-	minTerminalHeight = 20  // Minimum usable height
-	uiOverhead        = 9   // Header (1) + status (1) + borders (4) + padding (3)
+	minTerminalWidth  = 60 // Minimum usable width
+	minTerminalHeight = 20 // Minimum usable height
+	uiOverhead        = 9  // Header (1) + status (1) + borders (4) + padding (3)
 )
 
 // Application behavior constants
 const (
-	maxPreviewItems      = 20                   // Maximum items to show in directory preview
-	maxHistoryEntries    = 100                  // Maximum navigation history entries
-	maxUndoStackSize     = 10                   // Maximum undo operations to remember
-	previewUpdateDelay   = 250 * time.Millisecond // Delay before updating preview after cursor move
-	searchDebounceDelay  = 300 * time.Millisecond // Delay before triggering search after typing
-	minSearchChars       = 2                    // Minimum characters before triggering expensive searches
-	configSaveInterval   = 10                   // Save config every N directory visits
+	maxPreviewItems     = 20                     // Maximum items to show in directory preview
+	maxHistoryEntries   = 100                    // Maximum navigation history entries
+	maxUndoStackSize    = 10                     // Maximum undo operations to remember
+	previewUpdateDelay  = 250 * time.Millisecond // Delay before updating preview after cursor move
+	searchDebounceDelay = 300 * time.Millisecond // Delay before triggering search after typing
+	minSearchChars      = 2                      // Minimum characters before triggering expensive searches
+	configSaveInterval  = 10                     // Save config every N directory visits
+	maxPreviewCacheSize = 50                     // Maximum number of file previews to cache
+	gitStatusCacheTTL   = 5 * time.Second        // Git status cache validity duration
 )
 
 type mode int
@@ -105,83 +107,91 @@ const (
 )
 
 type fileItem struct {
-	path      string
-	name      string
-	isDir     bool
-	size      int64
-	modTime   time.Time
-	isSymlink bool
+	path       string
+	name       string
+	isDir      bool
+	size       int64
+	modTime    time.Time
+	isSymlink  bool
 	linkTarget string
 }
 
 // Config type is now in internal/config package
 
+type previewCacheEntry struct {
+	content string
+	modTime time.Time
+}
+
 type model struct {
-	mode                mode
-	currentDir          string
-	files               []fileItem
-	filteredFiles       []fileItem
-	cursor              int
-	scrollOffset        int
-	previewScroll       int
+	mode                 mode
+	currentDir           string
+	files                []fileItem
+	filteredFiles        []fileItem
+	cursor               int
+	scrollOffset         int
+	previewScroll        int
 	bookmarksCursor      int
 	sortedBookmarkPaths  []string // Bookmarks sorted by frecency for display
 	deleteBookmarkIndex  int      // Index of bookmark to delete
 	searchInput          textinput.Model
-	textInput           textinput.Model // For rename, create, command dialogs
-	width               int
-	height              int
-	showHidden          bool
-	showPreview         bool
-	previewContent      string
-	previewLines        []string
-	config              *config.Config
-	gitModified         map[string]bool
-	gitBranch           string
-	statusMsg           string
-	statusExpiry        time.Time
-	dirHistory          []string      // Navigation history
-	historyIndex        int           // Current position in history
-	recursiveSearch     bool          // Toggle for recursive vs current dir search
-	currentSearchType   searchType    // Filename or content search
-	loading             bool          // Loading indicator
-	searchMatches       [][]int       // Character positions that matched in fuzzy search
-	clipboard           []string      // Files in clipboard
-	clipboardOp         operationType // Copy or cut
-	sortBy              sortMode      // Current sort mode
-	dualPane            bool          // Dual pane mode enabled
-	activePane          int           // 0 = left, 1 = right
-	rightDir            string        // Right pane directory
-	rightFiles          []fileItem    // Right pane files
-	rightCursor         int           // Right pane cursor
-	rightScrollOffset   int           // Right pane scroll offset
+	textInput            textinput.Model // For rename, create, command dialogs
+	width                int
+	height               int
+	showHidden           bool
+	showPreview          bool
+	previewContent       string
+	previewLines         []string
+	config               *config.Config
+	gitModified          map[string]bool
+	gitBranch            string
+	gitStatusCacheTime   time.Time                    // Time when git status was cached
+	previewCache         map[string]previewCacheEntry // Preview content cache
+	previewCacheOrder    []string                     // LRU order for preview cache
+	statusMsg            string
+	statusExpiry         time.Time
+	dirHistory           []string              // Navigation history
+	historyIndex         int                   // Current position in history
+	recursiveSearch      bool                  // Toggle for recursive vs current dir search
+	currentSearchType    searchType            // Filename or content search
+	loading              bool                  // Loading indicator
+	searchMatches        [][]int               // Character positions that matched in fuzzy search
+	clipboard            []string              // Files in clipboard
+	clipboardOp          operationType         // Copy or cut
+	sortBy               sortMode              // Current sort mode
+	dualPane             bool                  // Dual pane mode enabled
+	activePane           int                   // 0 = left, 1 = right
+	rightDir             string                // Right pane directory
+	rightFiles           []fileItem            // Right pane files
+	rightCursor          int                   // Right pane cursor
+	rightScrollOffset    int                   // Right pane scroll offset
 	contentSearchResults []contentSearchResult // Ripgrep search results
-	contentSearchCursor int           // Cursor in content search results
-	previewPending      bool          // Preview update pending
-	previewCursor       int           // Cursor position preview is showing
-	lastCursorMove      time.Time     // Last time cursor moved
-	scrollingFast       bool          // Currently in fast scroll mode
-	helpScroll          int           // Help screen scroll position
-	errorMsg            string        // Error dialog message
-	errorDetails        string        // Detailed error info
-	undoStack           []undoItem    // Undo history
-	visitedDirs         map[string]bool // Track visited dirs for symlink loop detection
-	lastClickTime       time.Time     // Time of last mouse click
-	lastClickY          int           // Y position of last click
-	lastClickMode       mode          // Mode during last click
-	doubleClickThreshold time.Duration // Double-click time threshold (typically 300-500ms)
-	searchCancel        chan struct{} // Channel to cancel ongoing search
-	searchInProgress    bool          // Whether a search is currently running
-	scannedFiles        int           // Number of files scanned in current search
-	searchResultsLocked bool          // Whether search results are locked for navigation
-	searchResultChan    chan tea.Msg  // Channel for receiving search progress and results
+	contentSearchCursor  int                   // Cursor in content search results
+	previewPending       bool                  // Preview update pending
+	previewCursor        int                   // Cursor position preview is showing
+	lastCursorMove       time.Time             // Last time cursor moved
+	scrollingFast        bool                  // Currently in fast scroll mode
+	helpScroll           int                   // Help screen scroll position
+	errorMsg             string                // Error dialog message
+	errorDetails         string                // Detailed error info
+	undoStack            []undoItem            // Undo history
+	visitedDirs          map[string]bool       // Track visited dirs for symlink loop detection
+	lastClickTime        time.Time             // Time of last mouse click
+	lastClickY           int                   // Y position of last click
+	lastClickMode        mode                  // Mode during last click
+	doubleClickThreshold time.Duration         // Double-click time threshold (typically 300-500ms)
+	searchCancel         chan struct{}         // Channel to cancel ongoing search
+	searchInProgress     bool                  // Whether a search is currently running
+	scannedFiles         int                   // Number of files scanned in current search
+	searchResultsLocked  bool                  // Whether search results are locked for navigation
+	searchResultChan     chan tea.Msg          // Channel for receiving search progress and results
 }
 
 type undoItem struct {
-	operation   string // "delete"
-	path        string // Original path
-	wasDir      bool   // Was it a directory?
-	trashPath   string // Path in trash (if applicable)
+	operation string // "delete"
+	path      string // Original path
+	wasDir    bool   // Was it a directory?
+	trashPath string // Path in trash (if applicable)
 }
 
 type contentSearchResult struct {
@@ -236,37 +246,40 @@ func initialModel() model {
 	textIn.Width = 50
 
 	m := model{
-		mode:              modeNormal,
-		currentDir:        currentDir,
-		files:             []fileItem{},
-		cursor:            0,
-		previewScroll:     0,
-		bookmarksCursor:   0,
-		searchInput:       ti,
-		textInput:         textIn,
-		width:             0,
-		height:            0,
-		showHidden:        cfg.ShowHidden,
-		showPreview:       cfg.PreviewEnabled,
-		config:            cfg,
-		gitModified:       git.GetModifiedFiles(currentDir),
-		gitBranch:         git.GetBranch(currentDir),
-		dirHistory:        []string{currentDir},
-		historyIndex:      0,
-		recursiveSearch:   false,
-		currentSearchType: searchFilename,
-		loading:           false,
-		searchMatches:     [][]int{},
-		clipboard:         []string{},
-		clipboardOp:       opNone,
-		sortBy:            sortByName,
-		dualPane:          false,
-		activePane:        0,
-		rightDir:          currentDir,
-		rightFiles:        []fileItem{},
-		rightCursor:       0,
-		rightScrollOffset: 0,
-		visitedDirs:       make(map[string]bool),
+		mode:                 modeNormal,
+		currentDir:           currentDir,
+		files:                []fileItem{},
+		cursor:               0,
+		previewScroll:        0,
+		bookmarksCursor:      0,
+		searchInput:          ti,
+		textInput:            textIn,
+		width:                0,
+		height:               0,
+		showHidden:           cfg.ShowHidden,
+		showPreview:          cfg.PreviewEnabled,
+		config:               cfg,
+		gitModified:          git.GetModifiedFiles(currentDir),
+		gitBranch:            git.GetBranch(currentDir),
+		gitStatusCacheTime:   time.Now(),
+		previewCache:         make(map[string]previewCacheEntry),
+		previewCacheOrder:    []string{},
+		dirHistory:           []string{currentDir},
+		historyIndex:         0,
+		recursiveSearch:      false,
+		currentSearchType:    searchFilename,
+		loading:              false,
+		searchMatches:        [][]int{},
+		clipboard:            []string{},
+		clipboardOp:          opNone,
+		sortBy:               sortByName,
+		dualPane:             false,
+		activePane:           0,
+		rightDir:             currentDir,
+		rightFiles:           []fileItem{},
+		rightCursor:          0,
+		rightScrollOffset:    0,
+		visitedDirs:          make(map[string]bool),
 		doubleClickThreshold: 400 * time.Millisecond,
 	}
 
@@ -1030,12 +1043,56 @@ func (m *model) previewFile(path string) string {
 
 	preview.WriteString("\n")
 
-	// Check if binary or large file
-	if info.Size() > 1024*1024 || utils.IsBinaryFile(path) {
+	// Check if file is too large
+	if info.Size() > 1024*1024 {
 		preview.WriteString("─── File Metadata ───\n\n")
-		preview.WriteString(fmt.Sprintf("Type: %s\n", strings.ToUpper(strings.TrimPrefix(filepath.Ext(path), "."))))
+		preview.WriteString(fmt.Sprintf("Type: Large File (%s)\n", utils.FormatFileSize(info.Size())))
 		preview.WriteString(fmt.Sprintf("Full Path: %s\n", path))
-		preview.WriteString("\n(Binary file - preview unavailable)")
+		preview.WriteString("\n(File too large - preview disabled for performance)")
+		return preview.String()
+	}
+
+	// Check if file is previewable as text
+	if !utils.IsTextPreviewable(path) {
+		fileType := utils.GetFileType(path)
+		preview.WriteString("─── File Metadata ───\n\n")
+
+		switch fileType {
+		case utils.FileTypeMedia:
+			preview.WriteString(fmt.Sprintf("Type: Media File (%s)\n", strings.ToUpper(strings.TrimPrefix(filepath.Ext(path), "."))))
+			preview.WriteString(fmt.Sprintf("Full Path: %s\n", path))
+			preview.WriteString("\n(Image/Video/Audio files cannot be previewed in terminal)")
+		case utils.FileTypeDocument:
+			preview.WriteString(fmt.Sprintf("Type: Document (%s)\n", strings.ToUpper(strings.TrimPrefix(filepath.Ext(path), "."))))
+			preview.WriteString(fmt.Sprintf("Full Path: %s\n", path))
+			preview.WriteString("\n(Document files require external viewer)")
+		case utils.FileTypeArchive:
+			preview.WriteString(fmt.Sprintf("Type: Archive (%s)\n", strings.ToUpper(strings.TrimPrefix(filepath.Ext(path), "."))))
+			preview.WriteString(fmt.Sprintf("Full Path: %s\n", path))
+			preview.WriteString("\n(Archive contents not displayed)")
+		case utils.FileTypeDatabase:
+			preview.WriteString(fmt.Sprintf("Type: Database (%s)\n", strings.ToUpper(strings.TrimPrefix(filepath.Ext(path), "."))))
+			preview.WriteString(fmt.Sprintf("Full Path: %s\n", path))
+			preview.WriteString("\n(Binary database file)")
+		case utils.FileTypeFont:
+			preview.WriteString(fmt.Sprintf("Type: Font (%s)\n", strings.ToUpper(strings.TrimPrefix(filepath.Ext(path), "."))))
+			preview.WriteString(fmt.Sprintf("Full Path: %s\n", path))
+			preview.WriteString("\n(Font files cannot be previewed)")
+		case utils.FileTypeExecutable:
+			preview.WriteString(fmt.Sprintf("Type: Executable/Compiled Binary\n"))
+			preview.WriteString(fmt.Sprintf("Full Path: %s\n", path))
+			preview.WriteString("\n(Binary file - preview unavailable)")
+		default:
+			preview.WriteString(fmt.Sprintf("Type: %s\n", strings.ToUpper(strings.TrimPrefix(filepath.Ext(path), "."))))
+			preview.WriteString(fmt.Sprintf("Full Path: %s\n", path))
+			preview.WriteString("\n(Binary content detected)")
+		}
+		return preview.String()
+	}
+
+	// Check preview cache
+	if cached, ok := m.previewCache[path]; ok && cached.modTime.Equal(info.ModTime()) {
+		preview.WriteString(cached.content)
 		return preview.String()
 	}
 
@@ -1046,9 +1103,51 @@ func (m *model) previewFile(path string) string {
 		return preview.String()
 	}
 
-	preview.WriteString(string(content))
+	contentStr := string(content)
+	preview.WriteString(contentStr)
+
+	// Add to cache
+	m.addToPreviewCache(path, contentStr, info.ModTime())
 
 	return preview.String()
+}
+
+// addToPreviewCache adds content to preview cache with LRU eviction
+func (m *model) addToPreviewCache(path, content string, modTime time.Time) {
+	// Add entry
+	m.previewCache[path] = previewCacheEntry{
+		content: content,
+		modTime: modTime,
+	}
+
+	// Update LRU order - remove if exists, then append
+	for i, p := range m.previewCacheOrder {
+		if p == path {
+			m.previewCacheOrder = append(m.previewCacheOrder[:i], m.previewCacheOrder[i+1:]...)
+			break
+		}
+	}
+	m.previewCacheOrder = append(m.previewCacheOrder, path)
+
+	// Evict oldest if over limit
+	if len(m.previewCacheOrder) > maxPreviewCacheSize {
+		oldest := m.previewCacheOrder[0]
+		delete(m.previewCache, oldest)
+		m.previewCacheOrder = m.previewCacheOrder[1:]
+	}
+}
+
+// refreshGitStatus updates git status with caching
+func (m *model) refreshGitStatus() {
+	// Check if cache is still valid
+	if time.Since(m.gitStatusCacheTime) < gitStatusCacheTTL {
+		return // Use cached status
+	}
+
+	// Refresh git status
+	m.gitModified = git.GetModifiedFiles(m.currentDir)
+	m.gitBranch = git.GetBranch(m.currentDir)
+	m.gitStatusCacheTime = time.Now()
 }
 
 func (m *model) updateFrecency(dir string) {
