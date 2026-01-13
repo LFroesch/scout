@@ -2,44 +2,15 @@
 
 ## Current Tasks
 
-## Medium
-
 - show date on file window? search window too?
 - git [M] stops the cursor bar background
 - Add bookmark pinning/favoriting system (quick dial integration with frecency) split panel? quick dial one side, frecent on other? more columns? idk
 - make double ? right click ? work like o/enter
-
-## Prior to Launch
-
-- Make sure that how this is all set up is correct
-- User/test install to powershell? not just wsl?
-- Cross-platform testing (Windows, macOS, verify clipboard)
-- normalize to X client type (ps, wsl, ???)
-- test if it works with other editors (vim/etc)
-
-### Code Quality & Testing/
-
-- [ ] Integration tests (full workflows, cross-platform compatibility)
-- [ ] Document complex algorithms (fuzzy search, frecency)
-- [ ] Troubleshooting section in README
-- [ ] Configuration examples
-
-### Feature Ideas
-
-- Quick actions menu (custom commands per file type)
 - Enhanced file preview (images, PDFs, archives)
-- Git diff view for changes
-
-## Future Tasks
-
-**Features:** TUI settings menu, customizable keybindings, theme support
-
-**Performance:** Benchmark large directories, optimize fuzzy search, lazy load previews
-
-**Distribution:**
-- Package managers: Homebrew, AUR, Chocolatey, Snap/Flatpak
-- Auto-update mechanism with version checking
-- Demo GIF and comparison section in README
+- Git diff view for changes?
+- TUI settings menu, customizable keybindings, ignored files / folders / extensions/ theme/color / customization support
+- Benchmark large directories, optimize fuzzy search, lazy load previews
+- USE (platform-detection-plan.md) to fix cross-platform implementation
 
 ## DevLog
 
