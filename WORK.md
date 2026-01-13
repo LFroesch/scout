@@ -2,17 +2,26 @@
 
 ## Current Tasks
 
+## Minor
+
+- ensure you can click on the path links in preview while in terminal
 - update readme
-- weird on small terminals?
-- normalize to X client type (ps, wsl, ???)
-- searching is actually great now but lets make the UI a little sexier
+
+## Medium
+
 - binary check not working?
 - Caching whatever we can cleanly
 - Add bookmark pinning/favoriting system (quick dial integration with frecency) split panel? quick dial one side, frecent on other? more columns? idk
-- Cross-platform testing (Windows, macOS, verify clipboard)
-- test if it works with not vscode (vim/etc)
 
-### Code Quality & Testing
+## Prior to Launch
+
+- Make sure that how this is all set up is correct
+- User/test install to powershell? not just wsl?
+- Cross-platform testing (Windows, macOS, verify clipboard)
+- normalize to X client type (ps, wsl, ???)
+- test if it works with other editors (vim/etc)
+
+### Code Quality & Testing/
 
 - [ ] Integration tests (full workflows, cross-platform compatibility)
 - [ ] Document complex algorithms (fuzzy search, frecency)
@@ -38,12 +47,23 @@
 
 ## DevLog
 
-### 2026-01-10 - Status Bar Styling Fix
+### 2026-01-13 - Cursor Visibility Fix (Filtering & Toggling Hidden Files)
+- **Fixed cursor disappearing after filter operations**: Cursor now properly moves to last valid item when list shrinks (e.g., cursor at index 10, filtered list has 5 items → cursor moves to item 4)
+- **Auto-scroll adjustment**: Scroll offset automatically adjusts to ensure cursor stays visible after filtering, searching, or toggling hidden files
+- **New helper method**: Added `ensureCursorInBounds()` that clamps cursor and adjusts scroll - called after `loadFiles()`, `updateFilter()`, and search result updates
+- **Consistent behavior**: Applied fix to all filtering operations: search (/, tab modes), toggle hidden files (.), and directory navigation
+
+### 2026-01-10 - Status Bar Styling Fix & Search Status Colors
 - **Consistent background colors**: All status bar text now has explicit bg 235 - fixes rendering issues where background wasn't applied consistently
 - **Proper label styling**: Labels like "Branch:", "Sort:" use purple (99) with bold and bg 235
 - **Proper value styling**: Values like branch name, sort mode use white (255) with bg 235
 - **Fixed separators**: All separators (":", " | ", "/") now use whiteStyle with bg 235
 - **Keybind hints**: All keybind labels (purple) and descriptions (white) properly styled with bg 235
+- **Orange search indicators**: "Searching", "Searching...", "search continues..." now use orange (214) bold for visibility
+- **Purple file counts**: All numeric counts in search status ("87 files found", "2000 files scanned") use purple (99) bold
+- **White descriptive text**: Words like "files found", "files scanned", "Search complete:" use white (255)
+- **Styled minimum char message**: "Type at least X characters to search" uses white for text, purple for number
+- **Exit search status**: Shows orange "Exited search" message when leaving search mode (ESC, q, or f key)
 
 ### 2026-01-10 - UI Polish & Search Mode Improvements
 - **Enhanced status bar styling**: Numbers and keybinds now styled in purple (99) with darker background (235) - file counts, clipboard counts, scanned files, and all keybind hints are highlighted

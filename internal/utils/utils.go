@@ -10,6 +10,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// isVSCodeTerminal checks if running in VS Code integrated terminal
+func isVSCodeTerminal() bool {
+	return os.Getenv("TERM_PROGRAM") == "vscode"
+}
+
 // GetFileIcon returns an emoji icon for a file based on its extension
 func GetFileIcon(name string) string {
 	ext := strings.ToLower(filepath.Ext(name))
@@ -28,7 +33,7 @@ func GetFileIcon(name string) string {
 	case ".rs":
 		return "🦀"
 	case ".cpp", ".c", ".h":
-		return "⚙️"
+		return "🔧"
 	case ".html", ".htm":
 		return "🌐"
 	case ".css", ".scss", ".sass":
@@ -40,7 +45,7 @@ func GetFileIcon(name string) string {
 	case ".txt", ".log":
 		return "📄"
 	case ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico":
-		return "🖼️"
+		return "📸"
 	case ".mp4", ".avi", ".mov", ".mkv":
 		return "🎬"
 	case ".mp3", ".wav", ".flac", ".ogg":
@@ -54,7 +59,7 @@ func GetFileIcon(name string) string {
 	case ".xls", ".xlsx":
 		return "📊"
 	case ".sh", ".bash", ".zsh", "install":
-		return "🖥️"
+		return "💻"
 	case ".git", ".gitignore":
 		return "🔀"
 	default:

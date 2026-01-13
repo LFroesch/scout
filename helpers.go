@@ -127,10 +127,10 @@ func (m *model) openInVSCode(path string) tea.Cmd {
 		if _, err := exec.LookPath("code"); err == nil {
 			cmd := exec.Command("code", path)
 			cmd.Start()
-			m.statusMsg = fmt.Sprintf("Opening %s in VS Code", filepath.Base(path))
+			m.statusMsg = fmt.Sprintf("opening %s in vs code", filepath.Base(path))
 			m.statusExpiry = time.Now().Add(2 * time.Second)
 		} else {
-			m.statusMsg = "VS Code not found in PATH"
+			m.statusMsg = "vs code not found in path"
 			m.statusExpiry = time.Now().Add(3 * time.Second)
 		}
 
@@ -195,10 +195,53 @@ func (m *model) copyPath(path string) {
 	// Use clipboard library for cross-platform support
 	err := clipboard.WriteAll(path)
 	if err == nil {
-		m.statusMsg = fmt.Sprintf("Copied: %s", path)
+		m.statusMsg = fmt.Sprintf("copied: %s", path)
 		m.statusExpiry = time.Now().Add(2 * time.Second)
 	} else {
-		m.statusMsg = fmt.Sprintf("Failed to copy: %v", err)
+		m.statusMsg = fmt.Sprintf("failed to copy: %v", err)
 		m.statusExpiry = time.Now().Add(3 * time.Second)
+	}
+}
+
+// ensureCursorInBounds ensures cursor is within valid range and adjusts scroll to keep it visible
+func (m *model) ensureCursorInBounds() {
+	// Early return if no files
+	if len(m.filteredFiles) == 0 {
+		m.cursor = 0
+		m.scrollOffset = 0
+		return
+	}
+
+	// Clamp cursor to valid range - move to last item if out of bounds (user requested behavior)
+	if m.cursor >= len(m.filteredFiles) {
+		m.cursor = len(m.filteredFiles) - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+
+	// Calculate visible height
+	availableHeight := m.getSafeHeight() - uiOverhead
+	if availableHeight < 3 {
+		availableHeight = 3
+	}
+	visibleHeight := availableHeight - 1
+	if visibleHeight < 1 {
+		visibleHeight = 1
+	}
+
+	// Adjust scroll offset to keep cursor visible
+	if m.scrollOffset > m.cursor {
+		m.scrollOffset = m.cursor
+	}
+	maxScroll := len(m.filteredFiles) - visibleHeight
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if m.scrollOffset > maxScroll {
+		m.scrollOffset = maxScroll
+	}
+	if m.cursor >= m.scrollOffset+visibleHeight {
+		m.scrollOffset = m.cursor - visibleHeight + 1
 	}
 }
