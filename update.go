@@ -109,6 +109,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case searchResultMsg:
 		// Got search results (partial or final)
+		if m.mode != modeSearch {
+			return m, nil
+		}
 		if m.searchInProgress {
 			m.filteredFiles = msg.files
 			m.searchMatches = msg.matches
@@ -139,6 +142,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searchInProgress = false
 		m.loading = false
 		m.searchResultChan = nil // Stop listening for more messages
+
+		if m.mode != modeSearch {
+			return m, nil
+		}
 
 		// Update status with final count
 		if len(m.filteredFiles) > 0 {
@@ -171,6 +178,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case searchPartialMsg:
+		if m.mode != modeSearch {
+			return m, nil
+		}
 		// Update progress status with drive info if available
 		m.scannedFiles = msg.count
 		orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
@@ -233,7 +243,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.helpScroll--
 					}
 				} else {
-					m.helpScroll++
+					maxScroll := helpContentLines - (m.height - uiOverhead - 2)
+					if maxScroll < 0 {
+						maxScroll = 0
+					}
+					if m.helpScroll < maxScroll {
+						m.helpScroll++
+					}
 				}
 				return m, nil
 
@@ -283,8 +299,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 
 					clickY := msg.Y - 3 // Adjust for header
-					if clickY >= 0 && clickY < visibleItems {
-						newCursor := m.scrollOffset + clickY
+					topOffset := 0
+					if hasTopIndicator {
+						topOffset = 1
+					}
+					if clickY >= topOffset && clickY < topOffset+visibleItems {
+						newCursor := m.scrollOffset + (clickY - topOffset)
 						if newCursor >= 0 && newCursor < len(m.filteredFiles) {
 							// Check for double-click
 							now := time.Now()
@@ -369,8 +389,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 
 					clickY := msg.Y - 3 // Adjust for header
-					if clickY >= 0 && clickY < visibleItems {
-						newCursor := m.scrollOffset + clickY
+					topOffset := 0
+					if hasTopIndicator {
+						topOffset = 1
+					}
+					if clickY >= topOffset && clickY < topOffset+visibleItems {
+						newCursor := m.scrollOffset + (clickY - topOffset)
 						if newCursor >= 0 && newCursor < len(m.filteredFiles) {
 							// Check for double-click
 							now := time.Now()
@@ -751,7 +775,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 					selected := m.filteredFiles[m.cursor]
 					if selected.name == ".." {
-						m.mode = modeNormal
+						m.mode = m.previousMode
 						return m, nil
 					}
 
@@ -766,18 +790,29 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					trashPath, err := fileops.DeleteWithUndo(selected.path, selected.isDir)
 					if err != nil {
 						m.showError("DELETE FAILED", err.Error())
+						return m, nil
+					}
+					undoEntry.trashPath = trashPath
+					m.addToUndo(undoEntry)
+					m.statusMsg = fmt.Sprintf("deleted: %s (press 'u' to undo)", selected.name)
+					m.statusExpiry = time.Now().Add(3 * time.Second)
+					if m.previousMode == modeSearch {
+						// Stay in search: remove deleted item from results
+						m.filteredFiles = append(m.filteredFiles[:m.cursor], m.filteredFiles[m.cursor+1:]...)
+						if m.cursor < len(m.searchMatches) {
+							m.searchMatches = append(m.searchMatches[:m.cursor], m.searchMatches[m.cursor+1:]...)
+						}
+						m.ensureCursorInBounds()
+						m.mode = modeSearch
+						m.updatePreview()
 					} else {
-						undoEntry.trashPath = trashPath
-						m.addToUndo(undoEntry)
-						m.statusMsg = fmt.Sprintf("deleted: %s (press 'u' to undo)", selected.name)
-						m.statusExpiry = time.Now().Add(3 * time.Second)
 						m.loadFiles()
+						m.mode = modeNormal
 					}
 				}
-				m.mode = modeNormal
 				return m, nil
 			case "ctrl+c", "n", "N", "esc":
-				m.mode = modeNormal
+				m.mode = m.previousMode
 				return m, nil
 			}
 			return m, nil
@@ -785,7 +820,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeRename:
 			switch msg.String() {
 			case "ctrl+c", "esc":
-				m.mode = modeNormal
+				m.mode = m.previousMode
 				m.textInput.SetValue("")
 				return m, nil
 			case "enter":
@@ -797,10 +832,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						m.statusMsg = fmt.Sprintf("renamed to: %s", newName)
 						m.statusExpiry = time.Now().Add(2 * time.Second)
-						m.loadFiles()
+						if m.previousMode == modeSearch {
+							// Update item in search results without resetting search
+							newPath := filepath.Join(filepath.Dir(selected.path), newName)
+							m.filteredFiles[m.cursor].name = newName
+							m.filteredFiles[m.cursor].path = newPath
+						} else {
+							m.loadFiles()
+						}
 					}
 				}
-				m.mode = modeNormal
+				m.mode = m.previousMode
 				m.textInput.SetValue("")
 				return m, nil
 			default:
@@ -811,7 +853,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeCreateFile:
 			switch msg.String() {
 			case "ctrl+c", "esc":
-				m.mode = modeNormal
+				m.mode = m.previousMode
 				m.textInput.SetValue("")
 				return m, nil
 			case "enter":
@@ -825,7 +867,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.loadFiles()
 					}
 				}
-				m.mode = modeNormal
+				m.mode = m.previousMode
 				m.textInput.SetValue("")
 				return m, nil
 			default:
@@ -836,7 +878,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeCreateDir:
 			switch msg.String() {
 			case "ctrl+c", "esc":
-				m.mode = modeNormal
+				m.mode = m.previousMode
 				m.textInput.SetValue("")
 				return m, nil
 			case "enter":
@@ -850,7 +892,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.loadFiles()
 					}
 				}
-				m.mode = modeNormal
+				m.mode = m.previousMode
 				m.textInput.SetValue("")
 				return m, nil
 			default:
@@ -861,11 +903,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeHelp:
 			switch msg.String() {
 			case "ctrl+c", "esc", "?", "q":
-				m.mode = modeNormal
+				m.mode = m.previousMode
 				m.helpScroll = 0
 				return m, nil
 			case "j", "down":
-				m.helpScroll++
+				maxScroll := helpContentLines - (m.height - uiOverhead - 2)
+				if maxScroll < 0 {
+					maxScroll = 0
+				}
+				if m.helpScroll < maxScroll {
+					m.helpScroll++
+				}
 				return m, nil
 			case "k", "up":
 				if m.helpScroll > 0 {
@@ -1321,6 +1369,519 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, cmd
 
+			case "B":
+				// Add bookmark if locked, otherwise allow typing in search
+				if m.searchResultsLocked {
+					if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+						selected := m.filteredFiles[m.cursor]
+						if selected.isDir {
+							if !utils.Contains(m.config.Bookmarks, selected.path) {
+								m.config.Bookmarks = append(m.config.Bookmarks, selected.path)
+								if err := config.Save(m.config); err != nil {
+									m.showError("CONFIG SAVE FAILED", fmt.Sprintf("failed to save config: %v", err))
+								}
+								m.statusMsg = fmt.Sprintf("bookmark added: %s", selected.name)
+								m.statusExpiry = time.Now().Add(2 * time.Second)
+							} else {
+								m.statusMsg = "already bookmarked"
+								m.statusExpiry = time.Now().Add(2 * time.Second)
+							}
+						} else {
+							m.statusMsg = "can only bookmark directories"
+							m.statusExpiry = time.Now().Add(2 * time.Second)
+						}
+					}
+					return m, nil
+				}
+				// Allow typing 'B' in search
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "j":
+				// Navigate down when locked, otherwise type
+				if m.searchResultsLocked {
+					if m.cursor < len(m.filteredFiles)-1 {
+						m.cursor++
+						m.updatePreview()
+					}
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "k":
+				// Navigate up when locked, otherwise type
+				if m.searchResultsLocked {
+					if m.cursor > 0 {
+						m.cursor--
+						m.updatePreview()
+					}
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "g":
+				// Go to top when locked, otherwise type
+				if m.searchResultsLocked {
+					return m, m.moveCursor(0)
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "G":
+				// Go to bottom when locked, otherwise type
+				if m.searchResultsLocked {
+					if len(m.filteredFiles) > 0 {
+						return m, m.moveCursor(len(m.filteredFiles) - 1)
+					}
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "ctrl+g":
+				// Exit and cd to directory containing selected item (or current dir)
+				if m.searchResultsLocked && len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					selected := m.filteredFiles[m.cursor]
+					var targetDir string
+					if selected.isDir {
+						targetDir = selected.path
+					} else {
+						targetDir = filepath.Dir(selected.path)
+					}
+					m.cancelCurrentSearch()
+					m.writeLastDir(targetDir)
+				} else {
+					m.cancelCurrentSearch()
+					m.writeLastDir(m.currentDir)
+				}
+				return m, tea.Quit
+
+			case "ctrl+d":
+				// Half-page down when locked
+				if m.searchResultsLocked {
+					pageSize := (m.height - uiOverhead) / 2
+					if pageSize < 1 {
+						pageSize = 5
+					}
+					newPos := m.cursor + pageSize
+					if newPos >= len(m.filteredFiles) {
+						newPos = len(m.filteredFiles) - 1
+					}
+					return m, m.moveCursor(newPos)
+				}
+				return m, nil
+
+			case "ctrl+u":
+				// Half-page up when locked
+				if m.searchResultsLocked {
+					pageSize := (m.height - uiOverhead) / 2
+					if pageSize < 1 {
+						pageSize = 5
+					}
+					newPos := m.cursor - pageSize
+					if newPos < 0 {
+						newPos = 0
+					}
+					return m, m.moveCursor(newPos)
+				}
+				return m, nil
+
+			case "O":
+				// Open parent dir of selected result in VS Code when locked, otherwise type
+				if m.searchResultsLocked {
+					if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+						selected := m.filteredFiles[m.cursor]
+						var targetDir string
+						if selected.isDir {
+							targetDir = selected.path
+						} else {
+							targetDir = filepath.Dir(selected.path)
+						}
+						return m, m.openInVSCode(targetDir)
+					}
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "D":
+				// Delete selected file when locked, otherwise type
+				if m.searchResultsLocked {
+					if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+						selected := m.filteredFiles[m.cursor]
+						if selected.name != ".." {
+							m.previousMode = modeSearch
+							m.mode = modeConfirmFileDelete
+						}
+					}
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "r":
+				// Re-run search when locked, otherwise type
+				if m.searchResultsLocked {
+					m.searchResultsLocked = false
+					m.cancelCurrentSearch()
+					filtCmd := m.updateFilter()
+					return m, filtCmd
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "R":
+				// Rename selected file when locked, otherwise type
+				if m.searchResultsLocked {
+					if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+						selected := m.filteredFiles[m.cursor]
+						if selected.name != ".." {
+							m.previousMode = modeSearch
+							m.mode = modeRename
+							m.textInput.SetValue(selected.name)
+							m.textInput.Focus()
+							return m, textinput.Blink
+						}
+					}
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "c":
+				// Copy to clipboard when locked, otherwise type
+				if m.searchResultsLocked {
+					if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+						current := m.filteredFiles[m.cursor]
+						if current.name != ".." {
+							m.clipboard = []string{current.path}
+							m.clipboardOp = opCopy
+							m.statusMsg = fmt.Sprintf("copied: %s", current.name)
+							m.statusExpiry = time.Now().Add(2 * time.Second)
+						}
+					}
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "C":
+				// Append to copy clipboard when locked, otherwise type
+				if m.searchResultsLocked {
+					if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+						current := m.filteredFiles[m.cursor]
+						if current.name != ".." {
+							if m.clipboardOp == opCopy && len(m.clipboard) > 0 {
+								if !utils.Contains(m.clipboard, current.path) {
+									m.clipboard = append(m.clipboard, current.path)
+								}
+							} else {
+								m.clipboard = []string{current.path}
+								m.clipboardOp = opCopy
+							}
+							m.statusMsg = fmt.Sprintf("%d file(s) in copy clipboard", len(m.clipboard))
+							m.statusExpiry = time.Now().Add(2 * time.Second)
+						}
+					}
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "x":
+				// Cut to clipboard when locked, otherwise type
+				if m.searchResultsLocked {
+					if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+						current := m.filteredFiles[m.cursor]
+						if current.name != ".." {
+							m.clipboard = []string{current.path}
+							m.clipboardOp = opCut
+							m.statusMsg = fmt.Sprintf("cut: %s", current.name)
+							m.statusExpiry = time.Now().Add(2 * time.Second)
+						}
+					}
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "X":
+				// Append to cut clipboard when locked, otherwise type
+				if m.searchResultsLocked {
+					if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+						current := m.filteredFiles[m.cursor]
+						if current.name != ".." {
+							if m.clipboardOp == opCut && len(m.clipboard) > 0 {
+								if !utils.Contains(m.clipboard, current.path) {
+									m.clipboard = append(m.clipboard, current.path)
+								}
+							} else {
+								m.clipboard = []string{current.path}
+								m.clipboardOp = opCut
+							}
+							m.statusMsg = fmt.Sprintf("%d file(s) in cut clipboard", len(m.clipboard))
+							m.statusExpiry = time.Now().Add(2 * time.Second)
+						}
+					}
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "p":
+				// Paste when locked (to parent dir of selected), otherwise type
+				if m.searchResultsLocked {
+					if len(m.clipboard) > 0 {
+						// Paste to directory containing selected item
+						var pasteDir string
+						if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+							sel := m.filteredFiles[m.cursor]
+							if sel.isDir {
+								pasteDir = sel.path
+							} else {
+								pasteDir = filepath.Dir(sel.path)
+							}
+						} else {
+							pasteDir = m.currentDir
+						}
+						var err error
+						if m.clipboardOp == opCopy {
+							err = fileops.CopyMultiple(m.clipboard, pasteDir)
+						} else if m.clipboardOp == opCut {
+							err = fileops.MoveMultiple(m.clipboard, pasteDir)
+							if err == nil {
+								m.clipboard = []string{}
+								m.clipboardOp = opNone
+							}
+						}
+						if err != nil {
+							m.showError("PASTE FAILED", err.Error())
+						} else {
+							m.statusMsg = "pasted successfully"
+							m.statusExpiry = time.Now().Add(2 * time.Second)
+						}
+					}
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "u":
+				// Undo when locked, otherwise type
+				if m.searchResultsLocked {
+					if len(m.undoStack) > 0 {
+						lastUndo := m.undoStack[len(m.undoStack)-1]
+						m.undoStack = m.undoStack[:len(m.undoStack)-1]
+						if lastUndo.operation == "delete" && lastUndo.trashPath != "" {
+							if err := fileops.RestoreFromTrash(lastUndo.trashPath, lastUndo.path); err != nil {
+								m.showError("UNDO FAILED", fmt.Sprintf("could not restore %s: %v", filepath.Base(lastUndo.path), err))
+							} else {
+								m.statusMsg = fmt.Sprintf("restored: %s", filepath.Base(lastUndo.path))
+								m.statusExpiry = time.Now().Add(2 * time.Second)
+							}
+						}
+					} else {
+						m.statusMsg = "nothing to undo"
+						m.statusExpiry = time.Now().Add(2 * time.Second)
+					}
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case "?":
+				// Show help (works both locked and unlocked - does not type)
+				m.previousMode = modeSearch
+				m.mode = modeHelp
+				return m, nil
+
+			case "ctrl+f":
+				// Full-page down when locked
+				if m.searchResultsLocked {
+					pageSize := m.height - uiOverhead
+					if pageSize < 1 {
+						pageSize = 10
+					}
+					newPos := m.cursor + pageSize
+					if newPos >= len(m.filteredFiles) {
+						newPos = len(m.filteredFiles) - 1
+					}
+					return m, m.moveCursor(newPos)
+				}
+				return m, nil
+
+			case "ctrl+b":
+				// Full-page up when locked
+				if m.searchResultsLocked {
+					pageSize := m.height - uiOverhead
+					if pageSize < 1 {
+						pageSize = 10
+					}
+					newPos := m.cursor - pageSize
+					if newPos < 0 {
+						newPos = 0
+					}
+					return m, m.moveCursor(newPos)
+				}
+				return m, nil
+
+			case "P":
+				// Toggle preview panel when locked, otherwise type
+				if m.searchResultsLocked {
+					m.showPreview = !m.showPreview
+					return m, nil
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
+			case ",":
+				// Open config file (works both locked and unlocked)
+				configPath, err := config.GetConfigPath()
+				if err != nil {
+					m.statusMsg = fmt.Sprintf("error: cannot get config path: %v", err)
+					m.statusExpiry = time.Now().Add(3 * time.Second)
+					return m, nil
+				}
+				return m, m.openInVSCode(configPath)
+
+			case "backspace":
+				// When locked, backspace unlocks results and removes last char
+				if m.searchResultsLocked {
+					m.searchResultsLocked = false
+					m.searchInput, cmd = m.searchInput.Update(msg)
+					filterCmd := m.updateFilter()
+					m.updatePreview()
+					if cmd != nil && filterCmd != nil {
+						return m, tea.Batch(cmd, filterCmd)
+					} else if filterCmd != nil {
+						return m, filterCmd
+					}
+					return m, cmd
+				}
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				filterCmd := m.updateFilter()
+				m.updatePreview()
+				if cmd != nil && filterCmd != nil {
+					return m, tea.Batch(cmd, filterCmd)
+				} else if filterCmd != nil {
+					return m, filterCmd
+				}
+				return m, cmd
+
 			case "up", "down":
 				// Navigate through filtered results
 				if msg.String() == "up" {
@@ -1373,6 +1934,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			switch keyStr {
 			case "ctrl+c", "q":
+				return m, tea.Quit
+
+			case "ctrl+g":
+				// Exit and cd to current directory (requires shell integration, see ? help)
+				m.writeLastDir(m.currentDir)
 				return m, tea.Quit
 
 			case "j", "down":
@@ -1599,6 +2165,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
+			case "O":
+				// Open current directory in VS Code
+				return m, m.openInVSCode(m.currentDir)
+
 			case "r":
 				m.loadFiles()
 				m.refreshGitStatus()
@@ -1721,6 +2291,42 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.clipboard = []string{current.path}
 						m.clipboardOp = opCut
 						m.statusMsg = fmt.Sprintf("cut: %s", current.name)
+						m.statusExpiry = time.Now().Add(2 * time.Second)
+					}
+				}
+
+			case "C":
+				// Append current file to copy clipboard (multi-file)
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					current := m.filteredFiles[m.cursor]
+					if current.name != ".." {
+						if m.clipboardOp == opCopy && len(m.clipboard) > 0 {
+							if !utils.Contains(m.clipboard, current.path) {
+								m.clipboard = append(m.clipboard, current.path)
+							}
+						} else {
+							m.clipboard = []string{current.path}
+							m.clipboardOp = opCopy
+						}
+						m.statusMsg = fmt.Sprintf("%d file(s) in copy clipboard", len(m.clipboard))
+						m.statusExpiry = time.Now().Add(2 * time.Second)
+					}
+				}
+
+			case "X":
+				// Append current file to cut clipboard (multi-file)
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					current := m.filteredFiles[m.cursor]
+					if current.name != ".." {
+						if m.clipboardOp == opCut && len(m.clipboard) > 0 {
+							if !utils.Contains(m.clipboard, current.path) {
+								m.clipboard = append(m.clipboard, current.path)
+							}
+						} else {
+							m.clipboard = []string{current.path}
+							m.clipboardOp = opCut
+						}
+						m.statusMsg = fmt.Sprintf("%d file(s) in cut clipboard", len(m.clipboard))
 						m.statusExpiry = time.Now().Add(2 * time.Second)
 					}
 				}

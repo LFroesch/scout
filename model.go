@@ -60,6 +60,7 @@ const (
 	configSaveInterval  = 10                     // Save config every N directory visits
 	maxPreviewCacheSize = 50                     // Maximum number of file previews to cache
 	gitStatusCacheTTL   = 5 * time.Second        // Git status cache validity duration
+	helpContentLines    = 50                     // Total lines in help view (update if help content changes)
 )
 
 type mode int
@@ -185,6 +186,7 @@ type model struct {
 	scannedFiles         int                   // Number of files scanned in current search
 	searchResultsLocked  bool                  // Whether search results are locked for navigation
 	searchResultChan     chan tea.Msg          // Channel for receiving search progress and results
+	previousMode         mode                  // Mode to return to after sub-mode (rename, delete, help)
 }
 
 type undoItem struct {
@@ -568,6 +570,7 @@ func (m *model) updateFilter() tea.Cmd {
 	}
 
 	// For simple current directory search, still do it synchronously (it's fast)
+	m.cancelCurrentSearch() // Cancel any ongoing expensive search before sync search
 	m.searchCurrentDir(query)
 	m.statusMsg = fmt.Sprintf("found %d files", len(m.filteredFiles))
 	m.statusExpiry = time.Now().Add(3 * time.Second)
@@ -1221,4 +1224,15 @@ func (m *model) addToHistory(dir string) {
 		m.dirHistory = m.dirHistory[1:]
 		m.historyIndex--
 	}
+}
+
+// writeLastDir writes the given path to ~/.config/scout/last_dir for shell cd integration.
+// The shell wrapper function (see ? help) reads this file and cds to it after scout exits.
+func (m *model) writeLastDir(path string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	lastDirPath := filepath.Join(homeDir, ".config", "scout", "last_dir")
+	_ = os.WriteFile(lastDirPath, []byte(path), 0644)
 }
