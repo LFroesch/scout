@@ -1,10 +1,12 @@
 # Cross-Platform Detection & Fixes Plan
 
-## Status: WSL-specific assumptions break native Windows/macOS
+## Current State
 
-## Critical Issues (Must Fix)
+Scout is scoped to **Linux and WSL**. That's where it's developed and tested. Cross-platform code paths exist (macOS drive detection, trash, file opening via `runtime.GOOS`) but are untested. Native Windows is not supported — use WSL. The implementation steps below serve as a roadmap for when someone wants to tackle full cross-platform support.
 
-**Distribution:** ??? maybe?
+## Critical Issues (for future cross-platform support)
+
+**Distribution (future)**
 - Package managers: Homebrew, AUR, Chocolatey, Snap/Flatpak
 - Auto-update mechanism with version checking
 - Demo GIF and comparison section in README
@@ -65,11 +67,11 @@
 
 | Platform | Environment | Status |
 |----------|-------------|--------|
-| Linux | Native | ✅ Should work |
-| macOS | Native | ⚠️ Needs testing |
-| Windows | PowerShell | ❌ Broken (paths) |
-| Windows | CMD | ❌ Broken (paths) |
-| Windows | WSL | ✅ Currently works |
+| Linux | Native | ✅ Supported, tested |
+| Windows | WSL | ✅ Supported, tested |
+| macOS | Native | ⚠️ Untested, code paths exist |
+| Windows | PowerShell | ❌ Not supported |
+| Windows | CMD | ❌ Not supported |
 
 ## Files to Modify
 

@@ -2,17 +2,52 @@
 
 ## Current Tasks
 
-- show date on file window? search window too?
-- git [M] stops the cursor bar background
+- make sure searches work cleanly ✓ (click offset fixed, keybinds added)
+- height/width issues on different sized terminals, and elements being too wide for smaller screens, or being cut off and not making sense ✓ (dialogs responsive, hints truncate)
+- make moving / copy a little better/easier? ✓ (clipboard shows filename, C/X for multi-file)
+- less friction with settings etc
+  - settings / config / the shouldignore etc
+- image preview etc
+- show edit date on file window? search window too?
 - Add bookmark pinning/favoriting system (quick dial integration with frecency) split panel? quick dial one side, frecent on other? more columns? idk
 - make double ? right click ? work like o/enter
 - Enhanced file preview (images, PDFs, archives)
 - Git diff view for changes?
 - TUI settings menu, customizable keybindings, ignored files / folders / extensions/ theme/color / customization support
 - Benchmark large directories, optimize fuzzy search, lazy load previews
-- USE (platform-detection-plan.md) to fix cross-platform implementation
 
 ## DevLog
+
+### 2026-02-26 - Shell CD Integration
+- **ctrl+g to exit+cd**: Writes `currentDir` to `~/.config/scout/last_dir`, exits; shell wrapper reads and cds
+- **Shell wrapper**: `function scout() { command scout "$@"; local f="$HOME/.config/scout/last_dir"; [ -f "$f" ] && cd "$(cat "$f")" && rm -f "$f"; }` — add to `.zshrc`/`.bashrc`
+- **Help screen**: Documents function under SHELL CD INTEGRATION section
+
+### 2026-02-27 - Search Mode Keybinds & Mouse Fix
+- **Click offset fix**: When list is scrolled (top indicator ▲ showing), clicks were off by 1 — fixed `topOffset` accounting in both search and normal mode click handlers
+- **j/k navigation**: Vim-style navigation when results locked; types normally when unlocked
+- **g/G**: Jump to top/bottom of results when locked
+- **ctrl+g**: Exit+cd to directory of selected result (or current dir if unlocked) — works from search mode
+- **ctrl+d/ctrl+u**: Half-page navigation when locked
+- **O**: Open parent directory of selected result in VS Code when locked
+- **D**: Delete selected file when locked (triggers confirmation dialog)
+- **backspace when locked**: Unlocks results and removes last char, allowing search refinement
+
+### 2026-02-26 - Search Fixes, Layout Hardening, Copy/Move UX
+- **Search ghost messages fixed**: `searchCompleteMsg`/`searchResultMsg`/`searchPartialMsg` bail early when not in search mode — prevents status bar corruption after ESC
+- **Dialog responsive width**: All 6 dialogs shrink to `min(fixedWidth, termWidth-4)` instead of overflowing
+- **Dialog centering clamped**: Padding clamped to ≥ 0 — prevents crash on narrow terminals
+- **Status bar hints responsive**: Width < 90 → short hints; search header hints < 100 → compact form
+- **Clipboard indicator**: Shows `copy: filename.txt` / `cut: filename.txt` instead of `1 copied`
+- **Multi-file clipboard**: `C`/`X` append to clipboard; `c`/`x` still replace; help updated
+
+### 2026-02-03 - Platform Scope Documentation
+- **Scoped to Linux/WSL**: README now has a Platform Support table — Linux & WSL supported, macOS untested, native Windows not supported
+- **Cleaned up platform plan**: `platform-detection-plan.md` restructured as a future roadmap with current state documented
+- **Softened clipboard claim**: "Cross-platform Clipboard" → "Path Clipboard" (lists actual tools: xclip/xsel/pbcopy)
+
+### 2026-01-15 - Bookmark in Search Mode
+- **B key in search**: Added `B` keybind to add bookmarks while in search mode (requires locked results via Enter)
 
 ### 2026-01-13 - Search Cancellation Race Condition Fix
 - **Fixed premature search cancellation**: Removed cancelCurrentSearch() from Enter key handler - pressing Enter now only locks results without stopping the search

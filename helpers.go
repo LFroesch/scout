@@ -5,10 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/skratchdot/open-golang/open"
 
 	"github.com/LFroesch/scout/internal/utils"
@@ -244,4 +247,71 @@ func (m *model) ensureCursorInBounds() {
 	if m.cursor >= m.scrollOffset+visibleHeight {
 		m.scrollOffset = m.cursor - visibleHeight + 1
 	}
+}
+
+// placeOverlay centers fg (dialog box) over bg (background content), merging them line by line.
+// Uses ANSI-aware truncation so terminal colors in the background are preserved.
+func placeOverlay(bg, fg string) string {
+	bgLines := strings.Split(bg, "\n")
+	fgLines := strings.Split(fg, "\n")
+
+	bgHeight := len(bgLines)
+	fgHeight := len(fgLines)
+
+	fgWidth := 0
+	for _, line := range fgLines {
+		if w := lipgloss.Width(line); w > fgWidth {
+			fgWidth = w
+		}
+	}
+
+	startX := 0
+	startY := 0
+	// Find the widest bg line to center horizontally
+	bgWidth := 0
+	for _, line := range bgLines {
+		if w := lipgloss.Width(line); w > bgWidth {
+			bgWidth = w
+		}
+	}
+	startX = (bgWidth - fgWidth) / 2
+	startY = (bgHeight - fgHeight) / 2
+	if startX < 0 {
+		startX = 0
+	}
+	if startY < 0 {
+		startY = 0
+	}
+
+	result := make([]string, bgHeight)
+	copy(result, bgLines)
+
+	for i, fgLine := range fgLines {
+		bgIdx := startY + i
+		if bgIdx < 0 || bgIdx >= bgHeight {
+			continue
+		}
+
+		bgLine := bgLines[bgIdx]
+		bgLineWidth := lipgloss.Width(bgLine)
+
+		// Left portion of background before the dialog
+		left := xansi.Truncate(bgLine, startX, "")
+		leftWidth := lipgloss.Width(left)
+		// Fill any visual gap (e.g. if bg line is shorter than startX)
+		if leftWidth < startX {
+			left += strings.Repeat(" ", startX-leftWidth)
+		}
+
+		// Right portion of background after the dialog
+		right := ""
+		rightStart := startX + fgWidth
+		if rightStart < bgLineWidth {
+			right = xansi.Cut(bgLine, rightStart, bgLineWidth)
+		}
+
+		result[bgIdx] = left + fgLine + right
+	}
+
+	return strings.Join(result, "\n")
 }
