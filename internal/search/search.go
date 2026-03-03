@@ -1,6 +1,8 @@
 package search
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"io/fs"
 	"os/exec"
@@ -88,7 +90,8 @@ var skipAbsolutePaths = []string{
 
 // SearchFileContent searches for content within files using ripgrep
 // Limits: Max depth 5, max 2000 results, 30 second timeout
-func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-chan struct{}) ([]Result, error) {
+// onResult is called for each result as it's found (may be nil)
+func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-chan struct{}, onResult func(Result)) ([]Result, error) {
 	logger.Warn("Starting content search in %s for query '%s'", currentDir, query)
 	startTime := time.Now()
 	// Try to find ripgrep binary
@@ -192,8 +195,16 @@ func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-c
 	default:
 	}
 
-	// Run ripgrep with 30 second timeout and cancellation support
+	// Run ripgrep with streaming output
 	cmd := exec.Command(rgPath, args...)
+
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+
+	stdout, pipeErr := cmd.StdoutPipe()
+	if pipeErr != nil {
+		return nil, pipeErr
+	}
 
 	// Set up timeout AND cancellation monitoring
 	done := make(chan struct{})
@@ -210,50 +221,21 @@ func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-c
 				logger.Warn("Content search cancelled during execution")
 			}
 		case <-done:
-			// Command completed normally
 		}
 	}()
 
-	output, err := cmd.Output()
-	close(done) // Signal completion
-
-	if err != nil {
-		// rg returns exit code 1 if no matches found
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if exitErr.ExitCode() == 1 {
-				logger.Warn("Content search complete: no matches in %v", time.Since(startTime))
-				return []Result{}, nil
-			}
-			// Exit code 2 can mean invalid args OR permission errors
-			// Permission errors are normal - just parse what we got
-			if exitErr.ExitCode() == 2 {
-				stderr := string(exitErr.Stderr)
-				// If stderr only contains permission errors, treat as success with partial results
-				if strings.Contains(stderr, "Permission denied") {
-					logger.Warn("Content search had permission errors, continuing with partial results")
-					// Fall through to parse results
-				} else {
-					// Actual invalid args
-					logger.Error("Content search invalid args (exit 2): %s", stderr)
-					return nil, fmt.Errorf("ripgrep error: %s", stderr)
-				}
-			}
-		}
-		// Check if killed (by timeout or cancellation)
-		if strings.Contains(err.Error(), "killed") {
-			return nil, fmt.Errorf("search cancelled or timed out")
-		}
-		// For other errors, log but try to parse results anyway
-		logger.Warn("Content search had errors: %v", err)
+	if err := cmd.Start(); err != nil {
+		close(done)
+		return nil, err
 	}
 
-	logger.Warn("Content search got results, parsing output (%d bytes)", len(output))
-
-	// Parse results
+	// Parse results line-by-line as ripgrep outputs them
 	var results []Result
-	lines := strings.Split(string(output), "\n")
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
-	for _, line := range lines {
+	for scanner.Scan() {
+		line := scanner.Text()
 		if line == "" {
 			continue
 		}
@@ -266,28 +248,55 @@ func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-c
 			filePath := parts[0]
 			content := parts[3]
 
-			// Get relative path for display
 			relPath := filePath
 			if strings.HasPrefix(filePath, currentDir) {
-				rel, err := filepath.Rel(currentDir, filePath)
-				if err == nil {
+				if rel, err := filepath.Rel(currentDir, filePath); err == nil {
 					relPath = rel
 				}
 			}
 
-			// Create display name: file:line - content preview
 			displayName := fmt.Sprintf("%s:%d - %s", relPath, lineNum, strings.TrimSpace(content))
 			if len(displayName) > 100 {
 				displayName = displayName[:97] + "..."
 			}
 
-			results = append(results, Result{
+			result := Result{
 				Path:        filePath,
 				DisplayName: displayName,
 				IsDir:       false,
 				LineNumber:  lineNum,
-			})
+			}
+			results = append(results, result)
+			if onResult != nil {
+				onResult(result)
+			}
 		}
+	}
+
+	waitErr := cmd.Wait()
+	close(done)
+
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			switch exitErr.ExitCode() {
+			case 1:
+				// No matches - normal
+				logger.Warn("Content search complete: no matches in %v", time.Since(startTime))
+				return results, nil
+			case 2:
+				stderr := stderrBuf.String()
+				if !strings.Contains(stderr, "Permission denied") {
+					logger.Error("Content search invalid args (exit 2): %s", stderr)
+					return results, fmt.Errorf("ripgrep error: %s", stderr)
+				}
+				logger.Warn("Content search had permission errors, returning partial results")
+			}
+		}
+		if strings.Contains(waitErr.Error(), "killed") {
+			// Cancelled - return whatever we collected
+			return results, nil
+		}
+		logger.Warn("Content search wait error: %v", waitErr)
 	}
 
 	logger.Warn("Content search complete: %d results in %v", len(results), time.Since(startTime))
@@ -330,18 +339,25 @@ func SubstringMatchNames(query string, names []string) []MatchResult {
 
 // RecursiveSearchFiles searches for files recursively using substring matching with streaming results
 // Limits configurable via maxResults, maxDepth, maxFilesScanned parameters
-// Results are sent via callback as they're found, allowing progressive display
+// onResult is called for each matching file as it's found (may be nil)
 // customSkipDirs are user-configurable directories to skip (merged with hardcoded essentials)
-func RecursiveSearchFiles(query, currentDir string, showHidden bool, shouldIgnoreFn func(string) bool, cancelChan <-chan struct{}, onProgress func(scanned int), maxResults, maxDepth, maxFilesScanned int, customSkipDirs []string) ([]Result, []MatchResult) {
+func RecursiveSearchFiles(query, currentDir string, showHidden bool, shouldIgnoreFn func(string) bool, cancelChan <-chan struct{}, onProgress func(scanned int), onResult func(Result, MatchResult), maxResults, maxDepth, maxFilesScanned int, customSkipDirs []string) ([]Result, []MatchResult) {
 
 	logger.Warn("Starting recursive search in %s for query '%s'", currentDir, query)
 	startTime := time.Now()
 
-	var allFiles []Result
-	var allNames []string
+	lowerQuery := strings.ToLower(query)
+	var filteredFiles []Result
+	var searchMatches []MatchResult
 	scannedCount := 0
 	skippedDirs := 0
 	permissionErrors := 0
+
+	// Precompute prefix for fast relative path calculation (avoid filepath.Rel per file)
+	dirPrefix := currentDir
+	if !strings.HasSuffix(dirPrefix, string(filepath.Separator)) {
+		dirPrefix += string(filepath.Separator)
+	}
 
 	filepath.WalkDir(currentDir, func(path string, d fs.DirEntry, err error) error {
 		// Check cancellation first (critical for responsiveness)
@@ -415,16 +431,20 @@ func RecursiveSearchFiles(query, currentDir string, showHidden bool, shouldIgnor
 			}
 		}
 
+		// Fast relative path via prefix trim (avoids filepath.Rel syscall overhead)
+		relPath := strings.TrimPrefix(path, dirPrefix)
+		if relPath == path {
+			// path == currentDir itself, skip the root entry
+			return nil
+		}
+
 		// Check depth limit (prevents deep recursion on large drives)
-		relPath, _ := filepath.Rel(currentDir, path)
-		if relPath != "." {
-			depth := strings.Count(relPath, string(filepath.Separator))
-			if depth > maxDepth {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
+		depth := strings.Count(relPath, string(filepath.Separator))
+		if depth > maxDepth {
+			if d.IsDir() {
+				return filepath.SkipDir
 			}
+			return nil
 		}
 
 		// Skip hidden files if not showing them
@@ -443,24 +463,41 @@ func RecursiveSearchFiles(query, currentDir string, showHidden bool, shouldIgnor
 			return nil
 		}
 
-		// Get relative path for display
-		if relPath == "." {
-			return nil
-		}
+		// Inline substring matching - match as we walk, no second pass needed
+		// d.Info() is deferred to only matched files (avoids stat syscall on every file)
+		lowerName := strings.ToLower(relPath)
+		if idx := strings.Index(lowerName, lowerQuery); idx != -1 {
+			matchedIndexes := make([]int, len(query))
+			for j := range query {
+				matchedIndexes[j] = idx + j
+			}
 
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
+			// Only stat matched files (d.Info() triggers a syscall)
+			var size int64
+			var modTime time.Time
+			if info, err := d.Info(); err == nil {
+				size = info.Size()
+				modTime = info.ModTime()
+			}
 
-		allFiles = append(allFiles, Result{
-			Path:        path,
-			DisplayName: relPath,
-			IsDir:       d.IsDir(),
-			Size:        info.Size(),
-			ModTime:     info.ModTime(),
-		})
-		allNames = append(allNames, relPath)
+			result := Result{
+				Path:        path,
+				DisplayName: relPath,
+				IsDir:       d.IsDir(),
+				Size:        size,
+				ModTime:     modTime,
+			}
+			mr := MatchResult{Index: len(filteredFiles), MatchedIndexes: matchedIndexes}
+			filteredFiles = append(filteredFiles, result)
+			searchMatches = append(searchMatches, mr)
+			if onResult != nil {
+				onResult(result, mr)
+			}
+			if len(filteredFiles) >= maxResults {
+				logger.Warn("Hit max results limit (%d)", maxResults)
+				return filepath.SkipAll
+			}
+		}
 
 		return nil
 	})
@@ -470,41 +507,6 @@ func RecursiveSearchFiles(query, currentDir string, showHidden bool, shouldIgnor
 		logger.Warn("Scan complete: %d files scanned, %d dirs skipped, %d permission errors in %v", scannedCount, skippedDirs, permissionErrors, time.Since(startTime))
 	} else {
 		logger.Warn("Scan complete: %d files scanned, %d dirs skipped in %v", scannedCount, skippedDirs, time.Since(startTime))
-	}
-
-	// Check cancellation before fuzzy matching
-	select {
-	case <-cancelChan:
-		logger.Warn("Search cancelled before fuzzy matching")
-		return []Result{}, []MatchResult{}
-	default:
-	}
-
-	// Use substring matching (more predictable than fuzzy)
-	matchStart := time.Now()
-	matches := SubstringMatchNames(query, allNames)
-	logger.Warn("Substring matching took %v, found %d matches", time.Since(matchStart), len(matches))
-
-	var filteredFiles []Result
-	var searchMatches []MatchResult
-
-	for _, match := range matches {
-		// Check cancellation during result processing
-		select {
-		case <-cancelChan:
-			logger.Warn("Search cancelled during result processing")
-			return filteredFiles, searchMatches
-		default:
-		}
-
-		if len(filteredFiles) >= maxResults {
-			logger.Warn("Hit max results limit (%d)", maxResults)
-			break
-		}
-		if match.Index < len(allFiles) {
-			filteredFiles = append(filteredFiles, allFiles[match.Index])
-			searchMatches = append(searchMatches, match)
-		}
 	}
 
 	logger.Warn("Recursive search complete: returned %d results", len(filteredFiles))

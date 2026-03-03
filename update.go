@@ -108,32 +108,45 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case searchResultMsg:
-		// Got search results (partial or final)
-		if m.mode != modeSearch {
+		if !m.searchInProgress || m.mode != modeSearch {
 			return m, nil
 		}
-		if m.searchInProgress {
-			m.filteredFiles = msg.files
-			m.searchMatches = msg.matches
-			// Don't mark as complete yet - might be partial results
-			// searchCompleteMsg will mark it complete
+		m.filteredFiles = msg.files
+		m.searchMatches = msg.matches
 
-			// Show current result count
-			resultCount := len(m.filteredFiles)
-			orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
-			purpleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
-			whiteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("235")).Inline(true)
+		orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+		purpleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("99")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+		whiteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("235")).Inline(true)
 
-			m.statusMsg = orangeStyle.Render("searching... ") + whiteStyle.Render("found ") + purpleStyle.Render(fmt.Sprintf("%d", resultCount)) + whiteStyle.Render(" files")
-
-			// Ensure cursor is valid after search results update
-			m.ensureCursorInBounds()
+		m.ensureCursorInBounds()
+		// Only update preview when search finishes (avoid stat/read on every 50ms tick)
+		if msg.done {
 			m.updatePreview()
+		}
 
-			// Keep listening for more results
-			if m.searchResultChan != nil {
-				return m, waitForSearchMsg(m.searchResultChan)
+		if msg.done {
+			// Search complete
+			m.searchInProgress = false
+			m.loading = false
+			m.searchShared = nil
+			if len(m.filteredFiles) > 0 {
+				m.statusMsg = orangeStyle.Render("search ") + whiteStyle.Render("complete: ") + purpleStyle.Render(fmt.Sprintf("%d", len(m.filteredFiles))) + whiteStyle.Render(" files")
+			} else {
+				m.statusMsg = orangeStyle.Render("search ") + whiteStyle.Render("complete: no results")
 			}
+			m.statusExpiry = time.Now().Add(3 * time.Second)
+			return m, nil
+		}
+
+		// Intermediate result — show count and keep polling/listening
+		resultCount := len(m.filteredFiles)
+		m.statusMsg = orangeStyle.Render("searching... ") + whiteStyle.Render("found ") + purpleStyle.Render(fmt.Sprintf("%d", resultCount)) + whiteStyle.Render(" files")
+
+		if m.searchShared != nil {
+			return m, pollSearch(m.searchShared)
+		}
+		if m.searchResultChan != nil {
+			return m, waitForSearchMsg(m.searchResultChan)
 		}
 		return m, nil
 
@@ -722,7 +735,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					targetPath := m.sortedBookmarkPaths[m.bookmarksCursor]
 					// Ensure target is within root path
 					if m.config.RootPath == "" || strings.HasPrefix(targetPath, m.config.RootPath) {
-						return m, m.openInVSCode(targetPath)
+						return m, m.openInEditor(targetPath)
 					}
 				}
 				return m, nil
@@ -1326,7 +1339,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 						if selected.isDir {
 							// Directories: try VS Code
-							return m, m.openInVSCode(selected.path)
+							return m, m.openInEditor(selected.path)
 						} else {
 							// Files: try editor first, fall back to system default
 							if m.currentSearchType == searchContent {
@@ -1534,7 +1547,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						} else {
 							targetDir = filepath.Dir(selected.path)
 						}
-						return m, m.openInVSCode(targetDir)
+						return m, m.openInEditor(targetDir)
 					}
 					return m, nil
 				}
@@ -1856,7 +1869,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.statusExpiry = time.Now().Add(3 * time.Second)
 					return m, nil
 				}
-				return m, m.openInVSCode(configPath)
+				return m, m.openInEditor(configPath)
 
 			case "backspace":
 				// When locked, backspace unlocks results and removes last char
@@ -2153,7 +2166,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					if selected.isDir {
 						// Directories: try VS Code, falls back to showing message if not installed
-						return m, m.openInVSCode(selected.path)
+						return m, m.openInEditor(selected.path)
 					} else {
 						// Files: try editor first (VS Code/vim/nano), fall back to system default
 						// If content search result, open at specific line
@@ -2167,7 +2180,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "O":
 				// Open current directory in VS Code
-				return m, m.openInVSCode(m.currentDir)
+				return m, m.openInEditor(m.currentDir)
 
 			case "r":
 				m.loadFiles()
@@ -2391,7 +2404,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.statusExpiry = time.Now().Add(3 * time.Second)
 					return m, nil
 				}
-				return m, m.openInVSCode(configPath)
+				return m, m.openInEditor(configPath)
 			}
 		}
 	}

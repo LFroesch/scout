@@ -19,6 +19,30 @@ import (
 
 // Helper functions
 
+// editorCommand builds an exec.Cmd for the given editor binary, path, and optional line number.
+func editorCommand(editor, path string, line int) *exec.Cmd {
+	if line > 0 {
+		switch editor {
+		case "code", "cursor", "codium", "zed":
+			return exec.Command(editor, "-g", fmt.Sprintf("%s:%d", path, line))
+		case "vim", "vi", "nvim", "nano":
+			return exec.Command(editor, fmt.Sprintf("+%d", line), path)
+		default:
+			return exec.Command(editor, path)
+		}
+	}
+	return exec.Command(editor, path)
+}
+
+func (m *model) editorList() []string {
+	editors := []string{}
+	if m.config.Editor != "" {
+		editors = append(editors, m.config.Editor)
+	}
+	editors = append(editors, "code", "vim", "nano", "vi")
+	return editors
+}
+
 func (m *model) openFile(path string) tea.Cmd {
 	return func() tea.Msg {
 		filename := filepath.Base(path)
@@ -29,17 +53,14 @@ func (m *model) openFile(path string) tea.Cmd {
 
 		switch {
 		case utils.IsCodeFile(path):
-			// Try VS Code first, then fall back to other editors
-			editors := []string{"code", "subl", "atom", "vim", "nano"}
-			for _, editor := range editors {
+			for _, editor := range m.editorList() {
 				if _, err := exec.LookPath(editor); err == nil {
-					cmd = exec.Command(editor, path)
+					cmd = editorCommand(editor, path, 0)
 					foundEditor = true
 					break
 				}
 			}
 			if !foundEditor {
-				// No editor found
 				return fileOpenResultMsg{
 					success: false,
 					message: fmt.Sprintf("Can't open %s via scout", filename),
@@ -88,31 +109,9 @@ func (m *model) editFile(path string) tea.Cmd {
 
 func (m *model) editFileAtLine(path string, line int) tea.Cmd {
 	return func() tea.Msg {
-		// Use configured editor if set, otherwise try defaults
-		editors := []string{}
-		if m.config.Editor != "" {
-			editors = append(editors, m.config.Editor)
-		}
-		editors = append(editors, "code", "vim", "nano", "vi")
-
-		for _, editor := range editors {
+		for _, editor := range m.editorList() {
 			if _, err := exec.LookPath(editor); err == nil {
-				var cmd *exec.Cmd
-				if line > 0 {
-					// Open at specific line based on editor
-					switch editor {
-					case "code":
-						cmd = exec.Command(editor, "-g", fmt.Sprintf("%s:%d", path, line))
-					case "vim", "vi", "nvim":
-						cmd = exec.Command(editor, fmt.Sprintf("+%d", line), path)
-					case "nano":
-						cmd = exec.Command(editor, fmt.Sprintf("+%d", line), path)
-					default:
-						cmd = exec.Command(editor, path)
-					}
-				} else {
-					cmd = exec.Command(editor, path)
-				}
+				cmd := editorCommand(editor, path, line)
 				cmd.Stdin = os.Stdin
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
@@ -124,19 +123,19 @@ func (m *model) editFileAtLine(path string, line int) tea.Cmd {
 	}
 }
 
-func (m *model) openInVSCode(path string) tea.Cmd {
+func (m *model) openInEditor(path string) tea.Cmd {
 	return func() tea.Msg {
-		// Try to open with VS Code
-		if _, err := exec.LookPath("code"); err == nil {
-			cmd := exec.Command("code", path)
-			cmd.Start()
-			m.statusMsg = fmt.Sprintf("opening %s in vs code", filepath.Base(path))
-			m.statusExpiry = time.Now().Add(2 * time.Second)
-		} else {
-			m.statusMsg = "vs code not found in path"
-			m.statusExpiry = time.Now().Add(3 * time.Second)
+		for _, editor := range m.editorList() {
+			if _, err := exec.LookPath(editor); err == nil {
+				cmd := editorCommand(editor, path, 0)
+				cmd.Start()
+				m.statusMsg = fmt.Sprintf("opening %s in %s", filepath.Base(path), editor)
+				m.statusExpiry = time.Now().Add(2 * time.Second)
+				return nil
+			}
 		}
-
+		m.statusMsg = "no editor found in path"
+		m.statusExpiry = time.Now().Add(3 * time.Second)
 		return nil
 	}
 }
@@ -145,27 +144,9 @@ func (m *model) openExternalWithFallback(path string, line int) tea.Cmd {
 	return func() tea.Msg {
 		filename := filepath.Base(path)
 
-		// Try editors first (VS Code, vim, nano)
-		editors := []string{"code", "vim", "nano", "vi"}
-		for _, editor := range editors {
+		for _, editor := range m.editorList() {
 			if _, err := exec.LookPath(editor); err == nil {
-				var cmd *exec.Cmd
-				if line > 0 {
-					// Open at specific line based on editor
-					switch editor {
-					case "code":
-						cmd = exec.Command(editor, "-g", fmt.Sprintf("%s:%d", path, line))
-					case "vim", "vi", "nvim":
-						cmd = exec.Command(editor, fmt.Sprintf("+%d", line), path)
-					case "nano":
-						cmd = exec.Command(editor, fmt.Sprintf("+%d", line), path)
-					default:
-						cmd = exec.Command(editor, path)
-					}
-				} else {
-					cmd = exec.Command(editor, path)
-				}
-
+				cmd := editorCommand(editor, path, line)
 				err := cmd.Start()
 				if err == nil {
 					return fileOpenResultMsg{

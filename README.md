@@ -52,8 +52,8 @@ Press `?` in-app for the full list.
 | `Tab` (in search) | Cycle: Dir / Recursive / Content |
 | `S` | Cycle sort: Name/Size/Date/Type |
 | `.` | Toggle hidden files |
-| `o` | Open (file: editor/default app, dir: VS Code) |
-| `O` | Open current directory in VS Code |
+| `o` | Open (file: editor/default app, dir: editor) |
+| `O` | Open current directory in editor |
 | `y` | Copy path to clipboard |
 | `c/x/p` | Copy/cut/paste files (replace clipboard) |
 | `C/X` | Append to copy/cut clipboard (multi-file) |
@@ -103,7 +103,7 @@ Config lives at `~/.config/scout/scout-config.json` (press `,` to edit):
 | `maxDepth` | Recursive search depth (1-20) | 5 |
 | `maxFilesScanned` | Max files per search (1000-1000000) | 100000 |
 | `root_path` | Navigation ceiling | `$HOME` |
-| `editor` | Editor for `e` key | system default |
+| `editor` | Preferred editor (tries config first, then code/vim/nano/vi) | `code` fallback chain |
 
 ## Platform Support
 

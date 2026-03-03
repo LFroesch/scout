@@ -27,6 +27,16 @@ type searchDebounceMsg struct{ query string }
 type searchResultMsg struct {
 	files   []fileItem
 	matches [][]int
+	done    bool
+}
+
+// sharedSearchResults is written by the search goroutine and polled by the UI ticker
+type sharedSearchResults struct {
+	mu      sync.Mutex
+	files   []fileItem
+	matches [][]int
+	done    bool
+	err     error
 }
 type searchPartialMsg struct {
 	count int    // Total files scanned so far
@@ -185,7 +195,8 @@ type model struct {
 	searchInProgress     bool                  // Whether a search is currently running
 	scannedFiles         int                   // Number of files scanned in current search
 	searchResultsLocked  bool                  // Whether search results are locked for navigation
-	searchResultChan     chan tea.Msg          // Channel for receiving search progress and results
+	searchResultChan     chan tea.Msg           // Channel for receiving search progress (ultra search only)
+	searchShared         *sharedSearchResults  // Shared state polled by ticker (non-ultra searches)
 	previousMode         mode                  // Mode to return to after sub-mode (rename, delete, help)
 }
 
@@ -516,7 +527,7 @@ func (m *model) searchFileContent(query string) error {
 	cancelChan := make(chan struct{})
 	defer close(cancelChan)
 
-	results, err := search.SearchFileContent(query, m.currentDir, m.showHidden, cancelChan)
+	results, err := search.SearchFileContent(query, m.currentDir, m.showHidden, cancelChan, nil)
 	if err != nil {
 		return err
 	}
@@ -604,7 +615,7 @@ func (m *model) recursiveSearchFiles(query string) {
 	cancelChan := make(chan struct{})
 	defer close(cancelChan)
 
-	results, matches := search.RecursiveSearchFiles(query, m.currentDir, m.showHidden, utils.ShouldIgnore, cancelChan, nil, m.config.MaxResults, m.config.MaxDepth, m.config.MaxFilesScanned, m.config.SkipDirectories)
+	results, matches := search.RecursiveSearchFiles(query, m.currentDir, m.showHidden, utils.ShouldIgnore, cancelChan, nil, nil, m.config.MaxResults, m.config.MaxDepth, m.config.MaxFilesScanned, m.config.SkipDirectories)
 
 	// Convert search results to fileItems
 	m.filteredFiles = []fileItem{}
@@ -636,7 +647,7 @@ func (m *model) ultraSearchFiles(query string) {
 
 	// Search across all drives
 	for _, drive := range drives {
-		results, matches := search.RecursiveSearchFiles(query, drive, m.showHidden, utils.ShouldIgnore, cancelChan, nil, m.config.MaxResults, m.config.MaxDepth, m.config.MaxFilesScanned, m.config.SkipDirectories)
+		results, matches := search.RecursiveSearchFiles(query, drive, m.showHidden, utils.ShouldIgnore, cancelChan, nil, nil, m.config.MaxResults, m.config.MaxDepth, m.config.MaxFilesScanned, m.config.SkipDirectories)
 
 		for i, result := range results {
 			// Add drive label prefix to display name for clarity
@@ -670,7 +681,24 @@ func (m *model) cancelCurrentSearch() {
 		close(m.searchCancel)
 		m.searchCancel = nil
 	}
+	m.searchShared = nil
 	m.searchInProgress = false
+}
+
+// pollSearch returns a command that fires after 30ms and snapshots the shared search state
+func pollSearch(shared *sharedSearchResults) tea.Cmd {
+	return tea.Tick(30*time.Millisecond, func(t time.Time) tea.Msg {
+		shared.mu.Lock()
+		defer shared.mu.Unlock()
+		filesCopy := make([]fileItem, len(shared.files))
+		copy(filesCopy, shared.files)
+		matchesCopy := make([][]int, len(shared.matches))
+		copy(matchesCopy, shared.matches)
+		if shared.done && shared.err != nil {
+			return searchErrorMsg{err: shared.err}
+		}
+		return searchResultMsg{files: filesCopy, matches: matchesCopy, done: shared.done}
+	})
 }
 
 // performAsyncSearch runs the appropriate search in a goroutine
@@ -698,85 +726,25 @@ func (m *model) performAsyncSearch(query string) tea.Cmd {
 	m.searchMatches = [][]int{}
 	m.loading = true
 
-	// Create result channel
-	resultChan := make(chan tea.Msg, 10) // Buffered to handle bursts of progress updates
-	m.searchResultChan = resultChan
+	if searchType == searchUltra {
+		// Ultra search: streams per-drive results via channel (natural batch boundaries)
+		resultChan := make(chan tea.Msg, 10)
+		m.searchResultChan = resultChan
+		m.searchShared = nil
 
-	// Launch search in goroutine
-	go func() {
-		var files []fileItem
-		var matches [][]int
-		var err error
+		go func() {
+			var files []fileItem
+			var matches [][]int
 
-		// Progress callback - updates m.scannedFiles (will be polled by ticker)
-		var currentDrive string
-		onProgress := func(scanned int) {
-			// Send progress update
-			select {
-			case resultChan <- searchPartialMsg{count: scanned, drive: currentDrive}:
-			default:
-			}
-		}
-
-		// Run the appropriate search based on type
-		switch searchType {
-		case searchContent:
-			results, searchErr := search.SearchFileContent(query, currentDir, showHidden, cancelChan)
-			if searchErr != nil {
-				err = searchErr
-			} else {
-				// Convert results to fileItems
-				for _, result := range results {
-					select {
-					case <-cancelChan:
-						resultChan <- searchCompleteMsg{}
-						return
-					default:
-					}
-					files = append(files, fileItem{
-						path:  result.Path,
-						name:  result.DisplayName,
-						isDir: result.IsDir,
-						size:  int64(result.LineNumber),
-					})
-				}
-			}
-
-		case searchRecursive:
-			results, matchResults := search.RecursiveSearchFiles(query, currentDir, showHidden, utils.ShouldIgnore, cancelChan, onProgress, maxResults, maxDepth, maxFilesScanned, skipDirectories)
-			for i, result := range results {
-				select {
-				case <-cancelChan:
-					resultChan <- searchCompleteMsg{}
-					return
-				default:
-				}
-				files = append(files, fileItem{
-					path:    result.Path,
-					name:    result.DisplayName,
-					isDir:   result.IsDir,
-					size:    result.Size,
-					modTime: result.ModTime,
-				})
-				if i < len(matchResults) {
-					matches = append(matches, matchResults[i].MatchedIndexes)
-				}
-			}
-
-		case searchUltra:
 			drives := utils.GetMountedDrives()
 
-			// Channel to collect results from all drive searches
 			type driveResult struct {
 				files   []fileItem
 				matches [][]int
 			}
 			resultsChan := make(chan driveResult, len(drives))
-
-			// Use WaitGroup to track parallel searches
 			var wg sync.WaitGroup
 
-			// Launch parallel search for each drive
 			for _, drive := range drives {
 				wg.Add(1)
 				go func(drivePath string) {
@@ -788,11 +756,9 @@ func (m *model) performAsyncSearch(query string) tea.Cmd {
 					default:
 					}
 
-					// Notify which drive we're searching
 					driveLabel := utils.GetDriveLabel(drivePath)
 					resultChan <- searchPartialMsg{count: 0, drive: driveLabel}
 
-					// Progress callback for this drive
 					driveProgress := func(scanned int) {
 						select {
 						case resultChan <- searchPartialMsg{count: scanned, drive: driveLabel}:
@@ -800,16 +766,13 @@ func (m *model) performAsyncSearch(query string) tea.Cmd {
 						}
 					}
 
-					// Search this drive
-					results, matchResults := search.RecursiveSearchFiles(query, drivePath, showHidden, utils.ShouldIgnore, cancelChan, driveProgress, maxResults, maxDepth, maxFilesScanned, skipDirectories)
+					results, matchResults := search.RecursiveSearchFiles(query, drivePath, showHidden, utils.ShouldIgnore, cancelChan, driveProgress, nil, maxResults, maxDepth, maxFilesScanned, skipDirectories)
 
-					// Convert to fileItems with drive label
 					var driveFiles []fileItem
 					var driveMatches [][]int
 					for i, result := range results {
 						displayName := fmt.Sprintf("[%s] %s", driveLabel, result.DisplayName)
 						prefixLen := len(fmt.Sprintf("[%s] ", driveLabel))
-
 						driveFiles = append(driveFiles, fileItem{
 							path:    result.Path,
 							name:    displayName,
@@ -817,8 +780,6 @@ func (m *model) performAsyncSearch(query string) tea.Cmd {
 							size:    result.Size,
 							modTime: result.ModTime,
 						})
-
-						// Adjust match positions to account for drive label prefix
 						if i < len(matchResults) {
 							adjustedMatches := make([]int, len(matchResults[i].MatchedIndexes))
 							for j, pos := range matchResults[i].MatchedIndexes {
@@ -828,7 +789,6 @@ func (m *model) performAsyncSearch(query string) tea.Cmd {
 						}
 					}
 
-					// Send this drive's results
 					select {
 					case resultsChan <- driveResult{files: driveFiles, matches: driveMatches}:
 					case <-cancelChan:
@@ -837,55 +797,67 @@ func (m *model) performAsyncSearch(query string) tea.Cmd {
 				}(drive)
 			}
 
-			// Collector goroutine - waits for all drives and closes channel
 			go func() {
 				wg.Wait()
 				close(resultsChan)
 			}()
 
-			// Collect results from all drives as they complete
 			for result := range resultsChan {
 				files = append(files, result.files...)
 				matches = append(matches, result.matches...)
-				// Send intermediate results so UI updates immediately
 				resultChan <- searchResultMsg{files: files, matches: matches}
 			}
-			// All drives complete - send final complete message
 			resultChan <- searchCompleteMsg{}
-			return
+		}()
 
-		default: // searchFilename
-			results, matchResults := search.RecursiveSearchFiles(query, currentDir, showHidden, utils.ShouldIgnore, cancelChan, onProgress, maxResults, maxDepth, maxFilesScanned, skipDirectories)
-			for i, result := range results {
-				select {
-				case <-cancelChan:
-					resultChan <- searchCompleteMsg{}
-					return
-				default:
-				}
-				files = append(files, fileItem{
+		return waitForSearchMsg(resultChan)
+	}
+
+	// Non-ultra searches: goroutine writes to shared state, UI polls every 50ms
+	shared := &sharedSearchResults{}
+	m.searchShared = shared
+	m.searchResultChan = nil
+
+	go func() {
+		var err error
+
+		switch searchType {
+		case searchContent:
+			onResult := func(result search.Result) {
+				shared.mu.Lock()
+				shared.files = append(shared.files, fileItem{
+					path:  result.Path,
+					name:  result.DisplayName,
+					isDir: result.IsDir,
+					size:  int64(result.LineNumber),
+				})
+				shared.mu.Unlock()
+			}
+			_, err = search.SearchFileContent(query, currentDir, showHidden, cancelChan, onResult)
+
+		default: // searchRecursive and searchFilename (recursive fallback)
+			onResult := func(result search.Result, mr search.MatchResult) {
+				shared.mu.Lock()
+				shared.files = append(shared.files, fileItem{
 					path:    result.Path,
 					name:    result.DisplayName,
 					isDir:   result.IsDir,
 					size:    result.Size,
 					modTime: result.ModTime,
 				})
-				if i < len(matchResults) {
-					matches = append(matches, matchResults[i].MatchedIndexes)
-				}
+				shared.matches = append(shared.matches, mr.MatchedIndexes)
+				shared.mu.Unlock()
 			}
+			search.RecursiveSearchFiles(query, currentDir, showHidden, utils.ShouldIgnore, cancelChan, nil, onResult, maxResults, maxDepth, maxFilesScanned, skipDirectories)
 		}
 
-		// Send final results
-		if err != nil {
-			resultChan <- searchErrorMsg{err: err}
-		} else {
-			resultChan <- searchResultMsg{files: files, matches: matches}
-		}
+		shared.mu.Lock()
+		shared.err = err
+		shared.done = true
+		shared.mu.Unlock()
 	}()
 
-	// Return command that waits for next message from search
-	return waitForSearchMsg(resultChan)
+	return pollSearch(shared)
 }
 
 // waitForSearchMsg returns a command that waits for the next search message

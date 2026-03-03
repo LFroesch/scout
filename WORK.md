@@ -1,5 +1,7 @@
 # Scout - Development Roadmap
 
+## In Progress
+
 ## Current Tasks
 
 - make sure searches work cleanly ✓ (click offset fixed, keybinds added)
@@ -18,6 +20,14 @@
 
 ## DevLog
 
+### 2026-03-03 - Configurable Editor Support
+- **Editor config respected everywhere**: All editor-opening functions now use `config.Editor` first, falling back to code→vim→nano→vi
+- **Centralized editor logic**: `editorCommand()` helper handles editor-specific flags for code/cursor/codium/zed/vim/vi/nvim/nano
+- **Renamed `openInVSCode` → `openInEditor`**: Status messages show actual editor name
+
+### 2026-03-03 - Speeding Up Search
+- **Search Streaming / Speed** — deferred d.Info() to matches only (~99% fewer stat syscalls), replaced filepath.Rel with prefix trim, skip preview during streaming, poll interval 50→30ms
+
 ### 2026-02-26 - Shell CD Integration
 - **ctrl+g to exit+cd**: Writes `currentDir` to `~/.config/scout/last_dir`, exits; shell wrapper reads and cds
 - **Shell wrapper**: `function scout() { command scout "$@"; local f="$HOME/.config/scout/last_dir"; [ -f "$f" ] && cd "$(cat "$f")" && rm -f "$f"; }` — add to `.zshrc`/`.bashrc`
@@ -29,7 +39,7 @@
 - **g/G**: Jump to top/bottom of results when locked
 - **ctrl+g**: Exit+cd to directory of selected result (or current dir if unlocked) — works from search mode
 - **ctrl+d/ctrl+u**: Half-page navigation when locked
-- **O**: Open parent directory of selected result in VS Code when locked
+- **O**: Open parent directory of selected result in editor when locked
 - **D**: Delete selected file when locked (triggers confirmation dialog)
 - **backspace when locked**: Unlocks results and removes last char, allowing search refinement
 
