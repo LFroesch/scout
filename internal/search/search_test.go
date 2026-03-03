@@ -59,7 +59,7 @@ func TestRecursiveSearchFiles(t *testing.T) {
 	defer close(cancelChan)
 
 	// Search for "test"
-	results, matches := RecursiveSearchFiles("test", tempDir, false, shouldIgnore, cancelChan, nil, 5000, 5, 100000, []string{})
+	results, matches := RecursiveSearchFiles("test", tempDir, false, shouldIgnore, cancelChan, nil, nil, 5000, 5, 100000, []string{})
 
 	if len(results) < 2 {
 		t.Errorf("Expected at least 2 results for 'test', got %d", len(results))
@@ -96,7 +96,7 @@ func TestRecursiveSearchFilesHidden(t *testing.T) {
 	defer close(cancelChan)
 
 	// Search without showing hidden
-	resultsNoHidden, _ := RecursiveSearchFiles("txt", tempDir, false, shouldIgnore, cancelChan, nil, 5000, 5, 100000, []string{})
+	resultsNoHidden, _ := RecursiveSearchFiles("txt", tempDir, false, shouldIgnore, cancelChan, nil, nil, 5000, 5, 100000, []string{})
 	foundHidden := false
 	for _, result := range resultsNoHidden {
 		if filepath.Base(result.Path) == ".hidden.txt" {
@@ -108,7 +108,7 @@ func TestRecursiveSearchFilesHidden(t *testing.T) {
 	}
 
 	// Search with showing hidden
-	resultsWithHidden, _ := RecursiveSearchFiles("txt", tempDir, true, shouldIgnore, cancelChan, nil, 5000, 5, 100000, []string{})
+	resultsWithHidden, _ := RecursiveSearchFiles("txt", tempDir, true, shouldIgnore, cancelChan, nil, nil, 5000, 5, 100000, []string{})
 	foundHiddenNow := false
 	for _, result := range resultsWithHidden {
 		if filepath.Base(result.Path) == ".hidden.txt" {
