@@ -56,7 +56,7 @@ type fileOpenResultMsg struct {
 const (
 	minTerminalWidth  = 60 // Minimum usable width
 	minTerminalHeight = 20 // Minimum usable height
-	uiOverhead        = 9  // Header (1) + status (1) + borders (4) + padding (3)
+	uiOverhead        = 6  // Header (1) + status (1) + borders (2) + internal header (1) + separator (1)
 )
 
 // Application behavior constants

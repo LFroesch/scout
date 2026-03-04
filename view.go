@@ -352,7 +352,7 @@ func (m *model) renderFileList(width int) string {
 	}
 
 	// Reserve space for internal header (1 line)
-	contentHeight := availableHeight - 2
+	contentHeight := availableHeight - 1
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -641,7 +641,7 @@ func (m *model) renderFileList(width int) string {
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Width(width - 2).
-		Height(availableHeight + 2)
+		Height(availableHeight + 1)
 
 	combined := header + "\n" + fileList
 	return borderStyle.Render(combined)
@@ -654,7 +654,7 @@ func (m *model) renderPreview(width int) string {
 	}
 
 	// Reserve space for internal header (1 line)
-	contentHeight := availableHeight - 2
+	contentHeight := availableHeight - 1
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -674,7 +674,7 @@ func (m *model) renderPreview(width int) string {
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Width(width - 2).
-		Height(availableHeight + 2)
+		Height(availableHeight + 1)
 
 	var content string
 	if len(m.previewLines) == 0 {
@@ -727,7 +727,7 @@ func (m *model) renderPreview(width int) string {
 
 		// STRICT HEIGHT ENFORCEMENT: Ensure we never exceed contentHeight
 		// Reserve space for header + separator (2 lines total)
-		maxLines := availableHeight - 2
+		maxLines := availableHeight - 1
 		if len(lines) > maxLines {
 			lines = lines[:maxLines]
 		}
@@ -747,7 +747,7 @@ func (m model) renderBookmarksView() string {
 	}
 
 	// Reserve space for scroll indicators
-	contentHeight := availableHeight - 2
+	contentHeight := availableHeight - 1
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -766,7 +766,7 @@ func (m model) renderBookmarksView() string {
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Width(m.width - 2).
-		Height(availableHeight + 2)
+		Height(availableHeight + 1)
 
 	var bookmarkItems []string
 
@@ -1099,7 +1099,7 @@ func (m model) renderHelpView() string {
 	}
 
 	// Reserve space for scroll indicators
-	contentHeight := availableHeight - 2
+	contentHeight := availableHeight - 1
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -1119,7 +1119,7 @@ func (m model) renderHelpView() string {
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Width(m.width - 2).
-		Height(availableHeight + 2)
+		Height(availableHeight + 1)
 
 	// Build help content
 	keyStyle := lipgloss.NewStyle().
