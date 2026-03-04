@@ -292,7 +292,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if availableHeight < 3 {
 						availableHeight = 3
 					}
-					contentHeight := availableHeight - 2
+					contentHeight := availableHeight - 1
 					if contentHeight < 1 {
 						contentHeight = 1
 					}
@@ -382,7 +382,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if availableHeight < 3 {
 						availableHeight = 3
 					}
-					contentHeight := availableHeight - 2
+					contentHeight := availableHeight - 1
 					if contentHeight < 1 {
 						contentHeight = 1
 					}
@@ -477,7 +477,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if availableHeight < 3 {
 						availableHeight = 3
 					}
-					contentHeight := availableHeight - 2
+					contentHeight := availableHeight - 1
 					if contentHeight < 1 {
 						contentHeight = 1
 					}
@@ -575,7 +575,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if availableHeight < 3 {
 						availableHeight = 3
 					}
-					contentHeight := availableHeight - 2
+					contentHeight := availableHeight - 1
 					if contentHeight < 1 {
 						contentHeight = 1
 					}
@@ -639,7 +639,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if availableHeight < 3 {
 						availableHeight = 3
 					}
-					contentHeight := availableHeight - 2
+					contentHeight := availableHeight - 1
 					if contentHeight < 1 {
 						contentHeight = 1
 					}
@@ -1270,7 +1270,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if availableHeight < 3 {
 						availableHeight = 3
 					}
-					contentHeight := availableHeight - 2
+					contentHeight := availableHeight - 1
 					if contentHeight < 1 {
 						contentHeight = 1
 					}
@@ -1307,7 +1307,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if availableHeight < 3 {
 							availableHeight = 3
 						}
-						contentHeight := availableHeight - 2
+						contentHeight := availableHeight - 1
 						if contentHeight < 1 {
 							contentHeight = 1
 						}
@@ -2031,7 +2031,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if availableHeight < 3 {
 						availableHeight = 3
 					}
-					contentHeight := availableHeight - 2
+					contentHeight := availableHeight - 1
 					if contentHeight < 1 {
 						contentHeight = 1
 					}
