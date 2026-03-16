@@ -1,29 +1,31 @@
 # Scout
 
-A TUI file explorer and fuzzy finder built in Go. Vim-style navigation, fuzzy/recursive/content search, file operations, git integration, and live preview.
+TUI file explorer for the terminal. Built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+
+Navigate your filesystem with vim keys, search across directories, preview files, manage bookmarks, and do basic file ops without leaving the terminal.
 
 ## Install
 
 ```bash
-# Install script (auto-detects OS/arch)
-curl -sSL https://raw.githubusercontent.com/LFroesch/scout/main/install.sh | sh
-
-# Or with Go
 go install github.com/LFroesch/scout@latest
 ```
 
-Pre-compiled binaries available on [GitHub Releases](https://github.com/LFroesch/scout/releases) for Linux, macOS, and Windows (amd64/arm64).
+Or grab a binary from [Releases](https://github.com/LFroesch/scout/releases). There's also an install script:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/LFroesch/scout/main/install.sh | sh
+```
 
 ## Usage
 
 ```bash
-scout            # current directory
-scout /some/path # specific directory
+scout            # open in current directory
+scout /some/path # open in specific directory
 ```
 
 ## Shell CD Integration
 
-Press `ctrl+g` inside scout to exit and have your shell `cd` to the directory you were browsing. Requires a shell wrapper — add this to `~/.zshrc` or `~/.bashrc`:
+`ctrl+g` exits scout and cds your shell to wherever you were browsing. Add this wrapper to your `.zshrc` / `.bashrc`:
 
 ```zsh
 function scout() {
@@ -33,7 +35,7 @@ function scout() {
 }
 ```
 
-Then `source ~/.zshrc` (or open a new terminal). After that, `ctrl+g` in scout will drop you into the current directory when it exits. Normal `q`/`ctrl+c` quit without changing directory.
+Then `source ~/.zshrc`. Normal `q`/`ctrl+c` quit without changing directory.
 
 ## Keybindings
 
@@ -48,17 +50,17 @@ Press `?` in-app for the full list.
 | `ctrl+d/u` | Half-page scroll |
 | `ctrl+f/b` | Full-page scroll |
 | `~` | Home directory |
-| `/` | Search (fuzzy) |
+| `/` | Search |
 | `Tab` (in search) | Cycle: Dir / Recursive / Content |
 | `S` | Cycle sort: Name/Size/Date/Type |
 | `.` | Toggle hidden files |
-| `o` | Open (file: editor/default app, dir: editor) |
-| `O` | Open current directory in editor |
+| `o` | Open in editor |
+| `O` | Open current dir in editor |
 | `y` | Copy path to clipboard |
-| `c/x/p` | Copy/cut/paste files (replace clipboard) |
-| `C/X` | Append to copy/cut clipboard (multi-file) |
-| `D` | Delete (confirmation) |
-| `u` | Undo delete (trash) |
+| `c/x/p` | Copy/cut/paste files |
+| `C/X` | Multi-file copy/cut (append) |
+| `D` | Delete (with confirmation) |
+| `u` | Undo delete |
 | `R` | Rename |
 | `N/M` | New file/directory |
 | `b/B` | View/add bookmarks |
@@ -66,21 +68,20 @@ Press `?` in-app for the full list.
 | `,` | Open config |
 | `?` | Help |
 | `q/ctrl+c` | Quit |
-| `ctrl+g` | Quit and cd to current dir (shell integration) |
+| `ctrl+g` | Quit + cd (see above) |
 
-## Features
+## What it does
 
-- **Search** -- Fuzzy match in current dir, recursive across project tree, or content search via ripgrep. Results highlighted with match chars.
-- **File operations** -- Create, rename, delete (with undo via trash), copy/cut/paste, path copy to clipboard.
-- **Preview** -- Live file preview with scroll support. Categorizes text, media, archives, binaries, etc. LRU cached (50 files), skips files >1MB.
-- **Git** -- Branch display in header, `[M]` markers on modified files.
-- **Bookmarks** -- Frecency-sorted (frequency + recency). Press `b` to view, `B` to add.
-- **File type icons** -- Visual indicators per language/type.
-- **Configurable** -- Editor, root path boundary, skip directories (with wildcards), search limits, hidden files default.
+- **Search** with `/`. Searches current dir by default, `Tab` cycles to recursive and content search (needs [ripgrep](https://github.com/BurntSushi/ripgrep)). There's also an ultra mode that searches all mounted drives.
+- **File preview** in a side panel. Scrollable, cached, handles text/code/binary detection.
+- **File operations**: create, rename, delete (trash-based with undo), copy/cut/paste.
+- **Git awareness**: shows current branch and marks modified files with `[M]`.
+- **Bookmarks** sorted by frecency (how often + how recently you visit them).
+- **Configurable**: editor, search depth/limits, skip directories, hidden files default. Press `,` to edit config.
 
 ## Configuration
 
-Config lives at `~/.config/scout/scout-config.json` (press `,` to edit):
+Config file: `~/.config/scout/scout-config.json` (press `,` to open it)
 
 ```json
 {
@@ -96,25 +97,20 @@ Config lives at `~/.config/scout/scout-config.json` (press `,` to edit):
 }
 ```
 
-| Key | Description | Default |
+| Key | What it does | Default |
 |-----|-------------|---------|
-| `skip_directories` | Dirs to skip in search (supports wildcards) | common dev dirs |
-| `maxResults` | Max search results (100-50000) | 5000 |
-| `maxDepth` | Recursive search depth (1-20) | 5 |
-| `maxFilesScanned` | Max files per search (1000-1000000) | 100000 |
-| `root_path` | Navigation ceiling | `$HOME` |
-| `editor` | Preferred editor (tries config first, then code/vim/nano/vi) | `code` fallback chain |
+| `skip_directories` | Dirs to skip in search (wildcards ok) | common dev dirs |
+| `maxResults` | Max search results | 5000 |
+| `maxDepth` | Recursive search depth | 5 |
+| `maxFilesScanned` | Max files to scan per search | 100000 |
+| `root_path` | Can't navigate above this | `$HOME` |
+| `editor` | Your editor (falls back to code/vim/nano/vi) | — |
 
 ## Platform Support
 
-| Platform | Status |
-|----------|--------|
-| Linux | Supported, actively tested |
-| WSL | Supported, actively tested |
-| macOS | Should work, untested |
-| Windows | Use WSL |
+Built and tested on Linux and WSL. Should work on macOS but haven't tested it. For Windows, use WSL.
 
 ## Optional Dependencies
 
-- **ripgrep** (`rg`) -- Needed for content search (`/` then `Tab` twice)
-- **gio** or **trash-put** -- Enables trash-based deletion with undo (`u`)
+- [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) for content search
+- `gio` or `trash-put` for trash-based delete with undo

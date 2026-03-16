@@ -58,6 +58,7 @@ var skipDirs = map[string]bool{
 	"Library": true, "System": true, ".Trash": true,
 	// IDE/Editor
 	".idea": true, ".vscode": true, ".vs": true,
+	".cursor": true, ".zed": true, ".sublime-text": true,
 }
 
 // Skip directory patterns (for dynamic matching like TEMP*, wsl*, etc.)
@@ -89,9 +90,9 @@ var skipAbsolutePaths = []string{
 }
 
 // SearchFileContent searches for content within files using ripgrep
-// Limits: Max depth 5, max 2000 results, 30 second timeout
+// Limits configurable via maxResults, maxDepth parameters
 // onResult is called for each result as it's found (may be nil)
-func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-chan struct{}, onResult func(Result)) ([]Result, error) {
+func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-chan struct{}, onResult func(Result), maxResults, maxDepth int, customSkipDirs []string) ([]Result, error) {
 	logger.Warn("Starting content search in %s for query '%s'", currentDir, query)
 	startTime := time.Now()
 	// Try to find ripgrep binary
@@ -113,8 +114,8 @@ func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-c
 		"--column",
 		"--no-heading",
 		"--color=never",
-		"--max-depth=5",      // Limit search depth
-		"--max-count=2000",   // Max total results
+		fmt.Sprintf("--max-depth=%d", maxDepth),
+		fmt.Sprintf("--max-count=%d", maxResults),
 		"--max-filesize=1M",  // Skip files larger than 1MB (performance)
 	}
 
@@ -147,6 +148,7 @@ func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-c
 		"Library", "System", ".Trash",
 		// IDE/Editor
 		".idea", ".vscode", ".vs",
+		".cursor", ".zed", ".sublime-text",
 	}
 	// Add pattern-based exclusions separately (ripgrep glob syntax)
 	patternDirs := []string{
@@ -173,6 +175,9 @@ func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-c
 	}
 	for _, absPath := range absoluteExcludes {
 		args = append(args, "--glob", "!"+absPath)
+	}
+	for _, dir := range customSkipDirs {
+		args = append(args, "--glob", "!"+dir)
 	}
 
 	// Respect .gitignore and ignore common directories
