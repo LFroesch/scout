@@ -543,19 +543,36 @@ func (m *model) renderFileList(width int) string {
 
 		// Truncate name if needed
 		if lipgloss.Width(name) > maxNameLen {
-			runes := []rune(name)
-			truncated := ""
-			for _, r := range runes {
-				if lipgloss.Width(truncated+string(r)+"...") > maxNameLen {
-					break
+			if m.mode == modeSearch && strings.Contains(name, string(filepath.Separator)) {
+				// Search results: left-truncate to preserve filename
+				runes := []rune(name)
+				truncated := ""
+				for i := len(runes) - 1; i >= 0; i-- {
+					test := string(runes[i]) + truncated
+					if lipgloss.Width("..."+test) > maxNameLen {
+						break
+					}
+					truncated = test
 				}
-				truncated += string(r)
+				if truncated == "" && len(runes) > 0 {
+					truncated = string(runes[len(runes)-1])
+				}
+				displayName = "..." + truncated
+			} else {
+				// Normal mode: right-truncate
+				runes := []rune(name)
+				truncated := ""
+				for _, r := range runes {
+					if lipgloss.Width(truncated+string(r)+"...") > maxNameLen {
+						break
+					}
+					truncated += string(r)
+				}
+				if truncated == "" && len(runes) > 0 {
+					truncated = string(runes[0])
+				}
+				displayName = truncated + "..."
 			}
-			if truncated == "" && len(runes) > 0 {
-				// Handle case where even first char doesn't fit
-				truncated = string(runes[0])
-			}
-			displayName = truncated + "..."
 		}
 
 		// Build left side: icon + name + gitStatus (which includes symlink indicator)

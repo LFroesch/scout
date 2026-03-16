@@ -527,7 +527,7 @@ func (m *model) searchFileContent(query string) error {
 	cancelChan := make(chan struct{})
 	defer close(cancelChan)
 
-	results, err := search.SearchFileContent(query, m.currentDir, m.showHidden, cancelChan, nil)
+	results, err := search.SearchFileContent(query, m.currentDir, m.showHidden, cancelChan, nil, m.config.MaxResults, m.config.MaxDepth, m.config.SkipDirectories)
 	if err != nil {
 		return err
 	}
@@ -833,7 +833,7 @@ func (m *model) performAsyncSearch(query string) tea.Cmd {
 				})
 				shared.mu.Unlock()
 			}
-			_, err = search.SearchFileContent(query, currentDir, showHidden, cancelChan, onResult)
+			_, err = search.SearchFileContent(query, currentDir, showHidden, cancelChan, onResult, maxResults, maxDepth, skipDirectories)
 
 		default: // searchRecursive and searchFilename (recursive fallback)
 			onResult := func(result search.Result, mr search.MatchResult) {
