@@ -114,25 +114,6 @@ func (m model) renderHeader() string {
 
 	// Show search query only when in search mode
 	if m.mode == modeSearch {
-		// Show search in top-right of header
-		var searchMode string
-		switch m.currentSearchType {
-		case searchUltra:
-			searchMode = "ULTRA SEARCH"
-		case searchContent:
-			searchMode = "CONTENT SEARCH"
-		case searchRecursive:
-			searchMode = "RECURSIVE SEARCH"
-		case searchFilename:
-			if m.recursiveSearch {
-				searchMode = "RECURSIVE SEARCH"
-			} else {
-				searchMode = "CURRENT DIR SEARCH"
-			}
-		default:
-			searchMode = "FILE SEARCH"
-		}
-
 		// Build search parts with different colors
 		purpleStyle := lipgloss.NewStyle().
 			Bold(true).
@@ -149,22 +130,52 @@ func (m model) renderHeader() string {
 			Background(lipgloss.Color("235")).
 			Foreground(lipgloss.Color("226"))
 
+		// Pick search mode label based on available width
+		var searchMode string
+		switch m.currentSearchType {
+		case searchUltra:
+			if m.width < 80 {
+				searchMode = "ULTRA"
+			} else {
+				searchMode = "ULTRA SEARCH"
+			}
+		case searchContent:
+			if m.width < 80 {
+				searchMode = "CONTENT"
+			} else {
+				searchMode = "CONTENT SEARCH"
+			}
+		case searchRecursive:
+			if m.width < 80 {
+				searchMode = "RECURSIVE"
+			} else {
+				searchMode = "RECURSIVE SEARCH"
+			}
+		case searchFilename:
+			if m.recursiveSearch {
+				if m.width < 80 {
+					searchMode = "RECURSIVE"
+				} else {
+					searchMode = "RECURSIVE SEARCH"
+				}
+			} else {
+				if m.width < 80 {
+					searchMode = "DIR"
+				} else {
+					searchMode = "CURRENT DIR SEARCH"
+				}
+			}
+		default:
+			searchMode = "SEARCH"
+		}
+
+		// Add name/path indicator for recursive modes
+		if m.searchNameOnly && (m.recursiveSearch || m.currentSearchType == searchUltra) {
+			searchMode += " (name)"
+		}
+
 		searchLabel := fmt.Sprintf("🔍 %s: ", searchMode)
 		searchValue := m.searchInput.Value()
-		var hint string
-		if m.searchResultsLocked {
-			if m.width < 100 {
-				hint = " [🔒]"
-			} else {
-				hint = " [🔒] (enter: open | esc: exit | /: new search)"
-			}
-		} else {
-			if m.width < 100 {
-				hint = " (tab: modes)"
-			} else {
-				hint = " (tab: cycle modes | esc: clear/exit | enter: lock results)"
-			}
-		}
 
 		// Show cursor in search with yellow color
 		cursorPos := m.searchInput.Position()
@@ -180,10 +191,8 @@ func (m model) renderHeader() string {
 			displayValue = displayValue + "{{CURSOR}}"
 		}
 
-		// Render parts: purple label + gray text + yellow cursor + purple hint
+		// Render cursor-bearing text
 		searchLabelRendered := purpleStyle.Render(searchLabel)
-
-		// Split displayValue by cursor placeholder
 		parts := strings.Split(displayValue, "{{CURSOR}}")
 		var displayRendered string
 		if len(parts) == 2 {
@@ -192,37 +201,70 @@ func (m model) renderHeader() string {
 			displayRendered = grayStyle.Render(displayValue)
 		}
 
+		// Pick hint based on width
+		var hint string
+		if m.searchResultsLocked {
+			if m.width >= 120 {
+				hint = " [🔒] (enter: go to | esc: exit | /: new search | ctrl+p: preview)"
+			} else if m.width >= 100 {
+				hint = " [🔒] (enter: go to | esc: exit | /: new search)"
+			} else if m.width >= 75 {
+				hint = " [🔒]"
+			}
+		} else {
+			if m.width >= 140 {
+				hint = " (tab: modes | ctrl+n: name/path | ctrl+p: preview | esc: clear/exit)"
+			} else if m.width >= 120 {
+				hint = " (tab: modes | ctrl+n: name/path | esc: clear/exit)"
+			} else if m.width >= 100 {
+				hint = " (tab: cycle modes | esc: clear/exit | enter: lock results)"
+			} else if m.width >= 75 {
+				hint = " (tab: modes)"
+			}
+		}
 		hintRendered := purpleStyle.Render(hint)
 
+		// Build the search bar as a single line
 		searchText := searchLabelRendered + displayRendered + hintRendered
-
-		// Calculate widths for split layout
 		searchTextLen := lipgloss.Width(searchText)
-		titleWidth := m.width - searchTextLen - 2
-		if titleWidth < 20 {
-			titleWidth = 20
-			searchTextLen = m.width - titleWidth - 2
+
+		// Decide layout: side-by-side title+search, or search-only
+		if searchTextLen+22 <= m.width {
+			// Enough room: title on left, search on right
+			titleWidth := m.width - searchTextLen - 2
+			// Truncate the title path to fit
+			titleRunes := []rune(title)
+			if lipgloss.Width(title) > titleWidth-2 {
+				// Right-truncate the path
+				truncated := ""
+				for _, r := range titleRunes {
+					if lipgloss.Width(truncated+string(r)+"...") > titleWidth-2 {
+						break
+					}
+					truncated += string(r)
+				}
+				title = truncated + "..."
+			}
+
+			baseStyle := lipgloss.NewStyle().
+				Bold(true).
+				Background(lipgloss.Color("235")).
+				Foreground(lipgloss.Color("99"))
+
+			titlePart := baseStyle.Width(titleWidth).Padding(0, 1).Render(title)
+			title = lipgloss.JoinHorizontal(lipgloss.Top, titlePart, searchText)
+		} else {
+			// Not enough room — search bar is the entire header
+			title = searchText
 		}
 
-		// Style the title part
-		baseStyle := lipgloss.NewStyle().
-			Bold(true).
-			Background(lipgloss.Color("235")).
-			Foreground(lipgloss.Color("99"))
-
-		titlePart := baseStyle.Width(titleWidth).Padding(0, 1).Render(title)
-		searchPart := searchText
-
-		title = lipgloss.JoinHorizontal(lipgloss.Top, titlePart, searchPart)
-	}
-
-	// Return with full width background for search mode
-	if m.mode == modeSearch {
 		return lipgloss.NewStyle().
 			Bold(true).
 			Background(lipgloss.Color("235")).
 			Foreground(lipgloss.Color("99")).
 			Width(m.width).
+			MaxWidth(m.width).
+			MaxHeight(1).
 			Render(title)
 	}
 	return titleStyle.Render(title)
@@ -262,6 +304,9 @@ func (m *model) renderStatusBar() string {
 		}
 		// Show keybinds on right
 		rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": open | ") + purpleStyle.Render("o") + whiteStyle.Render(": vs code | ") + purpleStyle.Render("d") + whiteStyle.Render(": delete | ") + purpleStyle.Render("esc") + whiteStyle.Render(": back")
+	} else if m.mode == modeHelp {
+		statusText = whiteStyle.Render("help")
+		rightSide = purpleStyle.Render("j/k") + whiteStyle.Render(": scroll | ") + purpleStyle.Render("g/G") + whiteStyle.Render(": top/bottom | ") + purpleStyle.Render("q/esc") + whiteStyle.Render(": close")
 	} else {
 		// File count and position info
 		if len(m.filteredFiles) > 0 {
@@ -321,6 +366,13 @@ func (m *model) renderStatusBar() string {
 			selected := m.filteredFiles[m.cursor]
 			if m.width < 90 {
 				rightSide = purpleStyle.Render("?") + whiteStyle.Render(" help")
+			} else if m.mode == modeSearch && m.searchResultsLocked {
+				// Search mode (locked): enter navigates for both dirs and files
+				if selected.isDir {
+					rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": go to | ") + purpleStyle.Render("o") + whiteStyle.Render(": editor | ") + purpleStyle.Render("?") + whiteStyle.Render(" for help")
+				} else {
+					rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": go to | ") + purpleStyle.Render("o") + whiteStyle.Render(": open | ") + purpleStyle.Render("?") + whiteStyle.Render(" for help")
+				}
 			} else if selected.name == ".." {
 				rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": back | ") + purpleStyle.Render("?") + whiteStyle.Render(" for help")
 			} else if selected.isDir {
@@ -334,11 +386,31 @@ func (m *model) renderStatusBar() string {
 	}
 
 	totalWidth := m.width - 2 // Account for padding
-	padding := totalWidth - lipgloss.Width(statusText) - lipgloss.Width(rightSide) - 3
+	leftWidth := lipgloss.Width(statusText)
+	rightWidth := lipgloss.Width(rightSide)
+	padding := totalWidth - leftWidth - rightWidth - 3
+
+	// If not enough room for right side, truncate or hide it
 	if padding < 1 {
-		padding = 1
+		// Try showing just "? help" as minimal right side
+		minRight := purpleStyle.Render("?") + whiteStyle.Render(" help")
+		minRightWidth := lipgloss.Width(minRight)
+		minPadding := totalWidth - leftWidth - minRightWidth - 3
+		if minPadding >= 1 {
+			rightSide = minRight
+			padding = minPadding
+		} else {
+			// No room at all — drop right side entirely
+			rightSide = ""
+			padding = totalWidth - leftWidth - 3
+			if padding < 0 {
+				padding = 0
+			}
+		}
 	}
-	statusText += strings.Repeat(whiteStyle.Render(" "), padding) + rightSide
+	if rightSide != "" {
+		statusText += strings.Repeat(whiteStyle.Render(" "), padding) + rightSide
+	}
 
 	return statusStyle.Render(statusText)
 }
@@ -520,25 +592,31 @@ func (m *model) renderFileList(width int) string {
 
 		// Calculate available width for filename
 		// Reserve: icon(2) + space(1) + gitStatus(~8) + date + size(sizeWidth) + separators + padding(~10)
-		rightWidth := sizeWidth
+		rightColWidth := sizeWidth
 		if dateWidth > 0 {
-			rightWidth += dateWidth + 2 // "  " separator
+			rightColWidth += dateWidth + 2 // "  " separator
 		}
-		reservedSpace := 2 + 1 + 8 + rightWidth + 10
+		reservedSpace := 2 + 1 + 8 + rightColWidth + 10
 		maxNameLen := totalWidth - reservedSpace
+
+		// Progressively drop columns if name would be too short
+		if maxNameLen < 8 && dateWidth > 0 {
+			// Drop date column first
+			dateStr = ""
+			dateWidth = 0
+			rightColWidth = sizeWidth
+			reservedSpace = 2 + 1 + 8 + rightColWidth + 10
+			maxNameLen = totalWidth - reservedSpace
+		}
+		if maxNameLen < 8 && sizeWidth > 0 {
+			// Drop size column too
+			sizeStr = ""
+			sizeWidth = 0
+			rightColWidth = 0
+			maxNameLen = totalWidth - 15 // Just icon + gitStatus + padding
+		}
 		if maxNameLen < 8 {
-			maxNameLen = 8 // Absolute minimum for name
-			// In very small terminals, hide size/date to make room
-			if totalWidth < 30 {
-				sizeStr = ""
-				sizeWidth = 0
-				dateStr = ""
-				dateWidth = 0
-				maxNameLen = totalWidth - 15 // Just icon + gitStatus + padding
-				if maxNameLen < 8 {
-					maxNameLen = 8
-				}
-			}
+			maxNameLen = 8
 		}
 
 		// Truncate name if needed
@@ -862,10 +940,14 @@ func (m model) renderBookmarksView() string {
 				frecencyStr = "     " // 5 spaces to align with "×99 "
 			}
 
-			// Truncate path if needed
-			maxPathLen := m.width - 30
-			if maxPathLen < 20 {
-				maxPathLen = 20
+			// Calculate available width for path based on name length
+			nameWidth := lipgloss.Width(name)
+			frecencyWidth := lipgloss.Width(frecencyStr)
+			// icon(2) + spaces(3) + parens(2) + frecency + name + some padding
+			usedWidth := frecencyWidth + 2 + 1 + nameWidth + 3 + 4
+			maxPathLen := (m.width - 4) - usedWidth
+			if maxPathLen < 10 {
+				maxPathLen = 10
 			}
 			displayPath := path
 			if lipgloss.Width(path) > maxPathLen {
@@ -880,8 +962,26 @@ func (m model) renderBookmarksView() string {
 				displayPath = "..." + truncated[3:]
 			}
 
+			// Truncate name too if terminal is very narrow
+			maxNameLen := (m.width - 4) - frecencyWidth - 10
+			if maxNameLen < 8 {
+				maxNameLen = 8
+			}
+			displayName := name
+			if lipgloss.Width(name) > maxNameLen {
+				runes := []rune(name)
+				truncated := ""
+				for _, r := range runes {
+					if lipgloss.Width(truncated+string(r)+"...") > maxNameLen {
+						break
+					}
+					truncated += string(r)
+				}
+				displayName = truncated + "..."
+			}
+
 			// Build line without colors: frecency + icon + name + path
-			line := fmt.Sprintf("%s%s %s (%s)", frecencyStr, icon, name, displayPath)
+			line := fmt.Sprintf("%s%s %s (%s)", frecencyStr, icon, displayName, displayPath)
 
 			// Apply selection style with full width OR normal style with gray path
 			if i == m.bookmarksCursor {
@@ -1109,7 +1209,7 @@ func (m model) renderCreateDirDialog() string {
 	return dialogStyle.Render(dialog)
 }
 
-func (m model) renderHelpView() string {
+func (m *model) renderHelpView() string {
 	availableHeight := m.height - uiOverhead
 	if availableHeight < 3 {
 		availableHeight = 3
@@ -1210,6 +1310,9 @@ func (m model) renderHelpView() string {
 	allHelpContent = append(allHelpContent, helpLine("/", "start search (file/recursive/content)"))
 	allHelpContent = append(allHelpContent, helpLine("tab", "cycle search modes (while searching)"))
 	allHelpContent = append(allHelpContent, helpLine("↑/↓", "navigate results (while searching)"))
+	allHelpContent = append(allHelpContent, helpLine("enter", "lock results / go to file or dir"))
+	allHelpContent = append(allHelpContent, helpLine("ctrl+p", "toggle preview panel (while searching)"))
+	allHelpContent = append(allHelpContent, helpLine("ctrl+n", "toggle name-only / full-path search"))
 	allHelpContent = append(allHelpContent, helpLine("s", "cycle sort mode"))
 	allHelpContent = append(allHelpContent, helpLine(".", "toggle hidden files"))
 	allHelpContent = append(allHelpContent, "")
@@ -1292,6 +1395,14 @@ func (m model) renderErrorDialog() string {
 		dialogWidth = m.width - 4
 	}
 	dialogHeight := 15
+	// Clamp dialog height to terminal height minus some breathing room
+	maxDialogHeight := m.height - 4
+	if maxDialogHeight < 8 {
+		maxDialogHeight = 8
+	}
+	if dialogHeight > maxDialogHeight {
+		dialogHeight = maxDialogHeight
+	}
 
 	dialogStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -1299,7 +1410,8 @@ func (m model) renderErrorDialog() string {
 		Background(lipgloss.Color("232")).
 		Padding(1, 2).
 		Width(dialogWidth).
-		Height(dialogHeight)
+		Height(dialogHeight).
+		MaxHeight(dialogHeight + 2) // +2 for border
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -1316,8 +1428,21 @@ func (m model) renderErrorDialog() string {
 		Padding(1, 0).
 		Background(lipgloss.Color("232"))
 
+	// Truncate error details if they'd overflow the dialog
+	details := m.errorDetails
+	maxDetailLines := dialogHeight - 8 // title + padding + prompt take ~8 lines
+	if maxDetailLines < 1 {
+		maxDetailLines = 1
+	}
+	detailLines := strings.Split(details, "\n")
+	if len(detailLines) > maxDetailLines {
+		detailLines = detailLines[:maxDetailLines]
+		detailLines = append(detailLines, "... (truncated)")
+	}
+	details = strings.Join(detailLines, "\n")
+
 	title := titleStyle.Render("❌ ERROR")
-	content := contentStyle.Render(fmt.Sprintf("%s\n\ndetails:\n%s", m.errorMsg, m.errorDetails))
+	content := contentStyle.Render(fmt.Sprintf("%s\n\ndetails:\n%s", m.errorMsg, details))
 	prompt := promptStyle.Render("press any key to continue")
 
 	dialog := title + "\n" + content + "\n" + prompt

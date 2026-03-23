@@ -172,28 +172,70 @@ func contains(slice []string, item string) bool {
 // These are user-editable but provide a sensible starting point
 func getDefaultSkipDirectories() []string {
 	return []string{
-		// Python installations (Python27, Python38, Python312, etc.)
+		// === Version control ===
+		".git", ".svn", ".hg",
+
+		// === Dependencies & build ===
+		"node_modules", "vendor", ".npm", ".yarn",
+		"dist", "build", "target", ".next", ".nuxt",
+
+		// === Caches ===
+		".cache", "__pycache__", ".pytest_cache",
+
+		// === Python ===
+		".venv", "venv", "env", "virtualenv",
+		"site-packages", ".tox", ".mypy_cache",
 		"Python*",
-		// Common large game installations not caught by platform folders
-		"Call of Duty*",
-		"Grand Theft Auto*",
-		"Red Dead Redemption*",
-		"Cyberpunk*",
-		"The Witcher*",
-		"Minecraft*",
-		"World of Warcraft*",
-		// Browser caches and data
+
+		// === Language toolchains ===
+		".cargo", ".rustup", ".go", ".gradle",
+		".m2", ".ivy2", ".pub-cache",
+
+		// === IDE/Editor ===
+		".idea", ".vscode", ".vs",
+		".cursor", ".zed", ".sublime-text",
+
+		// === Game directories ===
+		"steamapps", "Steam", "SteamLibrary",
+		"Epic Games", "EpicGamesLauncher",
+		"XboxGames", "WindowsApps", "ModifiableWindowsApps",
+		"GOG Galaxy", "Origin Games", "Riot Games",
+		"Call of Duty*", "Grand Theft Auto*",
+		"Red Dead Redemption*", "Cyberpunk*",
+		"The Witcher*", "Minecraft*", "World of Warcraft*",
+		"Unreal*", "Unity*",
+
+		// === Windows system ===
+		"$Recycle.Bin", "$RECYCLE.BIN",
+		"System Volume Information", "Recovery",
+		"Windows", "Program Files", "Program Files (x86)",
+		"ProgramData", "AppData",
+		"Config.Msi", "PerfLogs", "AMD",
+		"TEMP*", "UMFD-*", "*Font Driver*",
+
+		// === Browser data ===
 		"Google/Chrome/User Data",
 		"Mozilla/Firefox/Profiles",
-		// Development tools
+
+		// === Linux system (absolute paths) ===
+		"/usr/bin", "/usr/lib", "/usr/lib32", "/usr/lib64",
+		"/usr/libx32", "/usr/share", "/usr/include", "/usr/src",
+		"/bin", "/sbin",
+		"/lib", "/lib32", "/lib64", "/libx32",
+		"/etc", "/opt",
+		"/mnt", "/media",
+
+		// === Linux/WSL runtime ===
+		"proc", "sys", "dev", "run", "lost+found",
+		"tmp", "var", "boot", "snap", "wslg",
+		"found.*",
+		"wsl*",
+
+		// === macOS ===
+		"Library", "System", ".Trash",
+
+		// === Dev tools ===
 		"Android/Sdk",
-		"node_modules",
-		"__pycache__",
-		".venv",
-		"venv",
-		// System/temp directories
-		"$Recycle.Bin",
-		"System Volume Information",
 	}
 }
 

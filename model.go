@@ -194,6 +194,7 @@ type model struct {
 	searchCancel         chan struct{}         // Channel to cancel ongoing search
 	searchInProgress     bool                  // Whether a search is currently running
 	scannedFiles         int                   // Number of files scanned in current search
+	searchNameOnly       bool                  // Match filename only vs full path
 	searchResultsLocked  bool                  // Whether search results are locked for navigation
 	searchResultChan     chan tea.Msg           // Channel for receiving search progress (ultra search only)
 	searchShared         *sharedSearchResults  // Shared state polled by ticker (non-ultra searches)
@@ -238,11 +239,28 @@ func (m *model) getContentHeight() int {
 	return availableHeight
 }
 
-func initialModel() model {
+func initialModel(rootOverride string) model {
 	currentDir, _ := os.Getwd()
 
 	// Load config
 	cfg := config.Load()
+
+	// CLI --root flag overrides config root_path
+	if rootOverride != "" {
+		cfg.RootPath = rootOverride
+		// Filter bookmarks to only those under the root
+		var filtered []string
+		for _, b := range cfg.Bookmarks {
+			if strings.HasPrefix(b, cfg.RootPath) {
+				filtered = append(filtered, b)
+			}
+		}
+		// Always include root itself as a bookmark
+		if !utils.Contains(filtered, cfg.RootPath) {
+			filtered = append([]string{cfg.RootPath}, filtered...)
+		}
+		cfg.Bookmarks = filtered
+	}
 
 	// Ensure we don't start above root path
 	if cfg.RootPath != "" && !strings.HasPrefix(currentDir, cfg.RootPath) {
@@ -615,7 +633,7 @@ func (m *model) recursiveSearchFiles(query string) {
 	cancelChan := make(chan struct{})
 	defer close(cancelChan)
 
-	results, matches := search.RecursiveSearchFiles(query, m.currentDir, m.showHidden, utils.ShouldIgnore, cancelChan, nil, nil, m.config.MaxResults, m.config.MaxDepth, m.config.MaxFilesScanned, m.config.SkipDirectories)
+	results, matches := search.RecursiveSearchFiles(query, m.currentDir, m.showHidden, utils.ShouldIgnore, cancelChan, nil, nil, m.config.MaxResults, m.config.MaxDepth, m.config.MaxFilesScanned, m.config.SkipDirectories, m.searchNameOnly)
 
 	// Convert search results to fileItems
 	m.filteredFiles = []fileItem{}
@@ -647,7 +665,7 @@ func (m *model) ultraSearchFiles(query string) {
 
 	// Search across all drives
 	for _, drive := range drives {
-		results, matches := search.RecursiveSearchFiles(query, drive, m.showHidden, utils.ShouldIgnore, cancelChan, nil, nil, m.config.MaxResults, m.config.MaxDepth, m.config.MaxFilesScanned, m.config.SkipDirectories)
+		results, matches := search.RecursiveSearchFiles(query, drive, m.showHidden, utils.ShouldIgnore, cancelChan, nil, nil, m.config.MaxResults, m.config.MaxDepth, m.config.MaxFilesScanned, m.config.SkipDirectories, m.searchNameOnly)
 
 		for i, result := range results {
 			// Add drive label prefix to display name for clarity
@@ -720,6 +738,7 @@ func (m *model) performAsyncSearch(query string) tea.Cmd {
 	maxDepth := m.config.MaxDepth
 	maxFilesScanned := m.config.MaxFilesScanned
 	skipDirectories := m.config.SkipDirectories
+	nameOnly := m.searchNameOnly
 
 	// Clear previous results and show loading
 	m.filteredFiles = []fileItem{}
@@ -766,7 +785,7 @@ func (m *model) performAsyncSearch(query string) tea.Cmd {
 						}
 					}
 
-					results, matchResults := search.RecursiveSearchFiles(query, drivePath, showHidden, utils.ShouldIgnore, cancelChan, driveProgress, nil, maxResults, maxDepth, maxFilesScanned, skipDirectories)
+					results, matchResults := search.RecursiveSearchFiles(query, drivePath, showHidden, utils.ShouldIgnore, cancelChan, driveProgress, nil, maxResults, maxDepth, maxFilesScanned, skipDirectories, nameOnly)
 
 					var driveFiles []fileItem
 					var driveMatches [][]int
@@ -848,7 +867,7 @@ func (m *model) performAsyncSearch(query string) tea.Cmd {
 				shared.matches = append(shared.matches, mr.MatchedIndexes)
 				shared.mu.Unlock()
 			}
-			search.RecursiveSearchFiles(query, currentDir, showHidden, utils.ShouldIgnore, cancelChan, nil, onResult, maxResults, maxDepth, maxFilesScanned, skipDirectories)
+			search.RecursiveSearchFiles(query, currentDir, showHidden, utils.ShouldIgnore, cancelChan, nil, onResult, maxResults, maxDepth, maxFilesScanned, skipDirectories, nameOnly)
 		}
 
 		shared.mu.Lock()

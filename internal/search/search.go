@@ -23,70 +23,38 @@ type Result struct {
 	LineNumber  int // For content searches
 }
 
-// Large directories to skip during recursive searches
-var skipDirs = map[string]bool{
-	// Version control
-	".git": true, ".svn": true, ".hg": true,
-	// Dependencies
-	"node_modules": true, "vendor": true, ".npm": true, ".yarn": true,
-	// Build outputs
-	"dist": true, "build": true, "target": true, ".next": true, ".nuxt": true,
-	// Caches
-	".cache": true, "__pycache__": true, ".pytest_cache": true,
-	// Python environments
-	".venv": true, "venv": true, "env": true, "virtualenv": true,
-	"site-packages": true, ".tox": true, ".mypy_cache": true,
-	// Language toolchains
-	".cargo": true, ".rustup": true, ".go": true, ".gradle": true,
-	".m2": true, ".ivy2": true, ".pub-cache": true,
-	// Game directories
-	"steamapps": true, "Steam": true, "SteamLibrary": true,
-	"Epic Games": true, "EpicGamesLauncher": true,
-	"XboxGames": true, "WindowsApps": true, "ModifiableWindowsApps": true,
-	"GOG Galaxy": true, "Origin Games": true, "Riot Games": true,
-	// Windows system dirs
-	"$Recycle.Bin": true, "$RECYCLE.BIN": true, "System Volume Information": true, "Recovery": true,
-	"Windows": true, "Program Files": true, "Program Files (x86)": true,
-	"ProgramData": true, "AppData": true,
-	"Config.Msi": true, "PerfLogs": true, "AMD": true,
-	// Linux system dirs (critical for WSL/native Linux)
-	"proc": true, "sys": true, "dev": true, "run": true, "lost+found": true,
-	"tmp": true, "var": true, "boot": true, "snap": true,
-	// WSL-specific
-	"wslg": true,
-	// macOS system
-	"Library": true, "System": true, ".Trash": true,
-	// IDE/Editor
-	".idea": true, ".vscode": true, ".vs": true,
-	".cursor": true, ".zed": true, ".sublime-text": true,
-}
-
-// Skip directory patterns (for dynamic matching like TEMP*, wsl*, etc.)
-var skipDirPatterns = []string{
-	"TEMP",           // TEMP.* directories
-	"UMFD-",          // UMFD-* font driver directories
-	"wsl",            // wsl* temporary directories
-	"found.",         // found.* system directories
-	"AMD",            // AMD* installer directories
-	".Font Driver",   // Font driver temp directories
-	"Unreal",         // Unreal Engine projects (UnrealEngine, Unreal Projects, etc.)
-	"Unity",          // Unity projects and cache
-}
-
-// Absolute paths to skip (for Linux/WSL system directories)
-// These are only checked for absolute paths to avoid filtering project folders
-var skipAbsolutePaths = []string{
-	"/usr",     // System binaries, libraries, documentation
-	"/bin",     // Essential command binaries
-	"/sbin",    // System binaries
-	"/lib",     // System libraries
-	"/lib32",   // 32-bit libraries
-	"/lib64",   // 64-bit libraries
-	"/libx32",  // x32 ABI libraries
-	"/etc",     // System configuration
-	"/opt",     // Optional software packages
-	"/mnt",     // Mounted drives (searched separately in ultrasearch to avoid duplicates)
-	"/media",   // Mounted media (searched separately in ultrasearch to avoid duplicates)
+// shouldSkipDir checks if a directory should be skipped based on the skip list.
+// Supports three pattern types:
+//   - Absolute paths: "/usr/bin" matches the exact full path
+//   - Wildcards: "Python*" matches any name starting with "Python"
+//   - Exact names: "node_modules" matches the directory name
+func shouldSkipDir(path, name string, skipDirs []string) bool {
+	for _, pattern := range skipDirs {
+		if strings.HasPrefix(pattern, "/") {
+			// Absolute path — match against full path
+			if path == pattern {
+				return true
+			}
+		} else if strings.HasPrefix(pattern, "*") && strings.HasSuffix(pattern, "*") {
+			// Contains match: *Font Driver* → name contains "Font Driver"
+			inner := pattern[1 : len(pattern)-1]
+			if strings.Contains(name, inner) {
+				return true
+			}
+		} else if strings.HasSuffix(pattern, "*") {
+			// Prefix wildcard: "Python*" → name starts with "Python"
+			prefix := pattern[:len(pattern)-1]
+			if strings.HasPrefix(name, prefix) {
+				return true
+			}
+		} else {
+			// Exact name match
+			if name == pattern {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // SearchFileContent searches for content within files using ripgrep
@@ -119,65 +87,9 @@ func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-c
 		"--max-filesize=1M",  // Skip files larger than 1MB (performance)
 	}
 
-	// Exclude large/system directories (same as recursive search filters)
-	// Note: ripgrep glob patterns use different syntax than filepath patterns
-	excludeDirs := []string{
-		// Version control
-		".git", ".svn", ".hg",
-		// Dependencies
-		"node_modules", "vendor", ".npm", ".yarn",
-		// Build outputs
-		"dist", "build", "target", ".next", ".nuxt",
-		// Caches
-		".cache", "__pycache__", ".pytest_cache",
-		// Python environments
-		".venv", "venv", "env", "virtualenv", "site-packages", ".tox", ".mypy_cache",
-		// Language toolchains
-		".cargo", ".rustup", ".go", ".gradle", ".m2", ".ivy2", ".pub-cache",
-		// Game directories
-		"steamapps", "Steam", "SteamLibrary", "Epic Games", "EpicGamesLauncher",
-		"XboxGames", "WindowsApps", "ModifiableWindowsApps",
-		"GOG Galaxy", "Origin Games", "Riot Games",
-		// Windows system
-		"$Recycle.Bin", "$RECYCLE.BIN", "System Volume Information", "Recovery",
-		"Windows", "Program Files", "Program Files (x86)", "ProgramData", "AppData",
-		"Config.Msi", "PerfLogs",
-		// Linux system
-		"proc", "sys", "dev", "run", "lost+found", "tmp", "var", "boot", "snap", "wslg",
-		// macOS system
-		"Library", "System", ".Trash",
-		// IDE/Editor
-		".idea", ".vscode", ".vs",
-		".cursor", ".zed", ".sublime-text",
-	}
-	// Add pattern-based exclusions separately (ripgrep glob syntax)
-	patternDirs := []string{
-		"TEMP*",         // TEMP, TEMP.*, etc.
-		"UMFD-*",        // UMFD-0, UMFD-1, etc.
-		"wsl*",          // wsl temporary dirs
-		"found.*",       // found.000, etc.
-		"AMD*",          // AMD installer dirs
-		"*Font Driver*", // Font driver directories
-		"Unreal*",       // Unreal Engine projects
-		"Unity*",        // Unity projects and cache
-	}
-	// Add absolute path exclusions for Linux/WSL system directories
-	// Using --glob with full paths for ripgrep
-	absoluteExcludes := []string{
-		"/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc", "/opt",
-	}
-
-	for _, dir := range excludeDirs {
-		args = append(args, "--glob", "!"+dir)
-	}
-	for _, pattern := range patternDirs {
+	// Build ripgrep exclusions from the config skip list
+	for _, pattern := range customSkipDirs {
 		args = append(args, "--glob", "!"+pattern)
-	}
-	for _, absPath := range absoluteExcludes {
-		args = append(args, "--glob", "!"+absPath)
-	}
-	for _, dir := range customSkipDirs {
-		args = append(args, "--glob", "!"+dir)
 	}
 
 	// Respect .gitignore and ignore common directories
@@ -346,7 +258,7 @@ func SubstringMatchNames(query string, names []string) []MatchResult {
 // Limits configurable via maxResults, maxDepth, maxFilesScanned parameters
 // onResult is called for each matching file as it's found (may be nil)
 // customSkipDirs are user-configurable directories to skip (merged with hardcoded essentials)
-func RecursiveSearchFiles(query, currentDir string, showHidden bool, shouldIgnoreFn func(string) bool, cancelChan <-chan struct{}, onProgress func(scanned int), onResult func(Result, MatchResult), maxResults, maxDepth, maxFilesScanned int, customSkipDirs []string) ([]Result, []MatchResult) {
+func RecursiveSearchFiles(query, currentDir string, showHidden bool, shouldIgnoreFn func(string) bool, cancelChan <-chan struct{}, onProgress func(scanned int), onResult func(Result, MatchResult), maxResults, maxDepth, maxFilesScanned int, customSkipDirs []string, nameOnly bool) ([]Result, []MatchResult) {
 
 	logger.Warn("Starting recursive search in %s for query '%s'", currentDir, query)
 	startTime := time.Now()
@@ -395,45 +307,10 @@ func RecursiveSearchFiles(query, currentDir string, showHidden bool, shouldIgnor
 			return filepath.SkipAll
 		}
 
-		// Skip large/system directories early (BEFORE depth check)
-		if d.IsDir() {
-			// Check absolute system paths first (only for root-level directories)
-			for _, absPath := range skipAbsolutePaths {
-				if path == absPath {
-					skippedDirs++
-					return filepath.SkipDir
-				}
-			}
-
-			// Check hardcoded essential directories (exact matches)
-			if skipDirs[d.Name()] {
-				skippedDirs++
-				return filepath.SkipDir
-			}
-
-			// Check hardcoded pattern matches (for TEMP*, UMFD-*, wsl*, etc.)
-			for _, pattern := range skipDirPatterns {
-				if strings.HasPrefix(d.Name(), pattern) {
-					skippedDirs++
-					return filepath.SkipDir
-				}
-			}
-
-			// Check user-configurable skip directories
-			for _, customPattern := range customSkipDirs {
-				// Support wildcards with * (e.g., "Python*", "Call of Duty*")
-				if strings.HasSuffix(customPattern, "*") {
-					prefix := strings.TrimSuffix(customPattern, "*")
-					if strings.HasPrefix(d.Name(), prefix) {
-						skippedDirs++
-						return filepath.SkipDir
-					}
-				} else if d.Name() == customPattern {
-					// Exact match
-					skippedDirs++
-					return filepath.SkipDir
-				}
-			}
+		// Skip directories from config skip list (supports exact, wildcard, and absolute paths)
+		if d.IsDir() && shouldSkipDir(path, d.Name(), customSkipDirs) {
+			skippedDirs++
+			return filepath.SkipDir
 		}
 
 		// Fast relative path via prefix trim (avoids filepath.Rel syscall overhead)
@@ -470,11 +347,21 @@ func RecursiveSearchFiles(query, currentDir string, showHidden bool, shouldIgnor
 
 		// Inline substring matching - match as we walk, no second pass needed
 		// d.Info() is deferred to only matched files (avoids stat syscall on every file)
-		lowerName := strings.ToLower(relPath)
-		if idx := strings.Index(lowerName, lowerQuery); idx != -1 {
+		var matchTarget string
+		var matchOffset int // offset to translate match position back to relPath for highlighting
+		if nameOnly {
+			matchTarget = strings.ToLower(d.Name())
+			// basename starts at last separator + 1 in relPath
+			if lastSep := strings.LastIndex(relPath, string(filepath.Separator)); lastSep != -1 {
+				matchOffset = lastSep + 1
+			}
+		} else {
+			matchTarget = strings.ToLower(relPath)
+		}
+		if idx := strings.Index(matchTarget, lowerQuery); idx != -1 {
 			matchedIndexes := make([]int, len(query))
 			for j := range query {
-				matchedIndexes[j] = idx + j
+				matchedIndexes[j] = idx + j + matchOffset
 			}
 
 			// Only stat matched files (d.Info() triggers a syscall)
