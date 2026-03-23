@@ -15,16 +15,7 @@
 go.work
 
 # Built binaries (app-specific)
-backup-xd
-dwight
-git-helper
-lif
-logdog
-portmon
-project-launcher
 scout
-scriptgodx
-zap
 
 # OS files
 .DS_Store
@@ -43,3 +34,9 @@ Thumbs.db
 .claude/
 logs/
 scout-test
+
+# Dev artifacts
+platform-detection-plan.md
+WORK.md
+agent_spec.md
+CLAUDE.md
