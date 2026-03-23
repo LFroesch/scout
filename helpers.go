@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -13,11 +12,19 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/skratchdot/open-golang/open"
-
-	"github.com/LFroesch/scout/internal/utils"
 )
 
 // Helper functions
+
+// isTerminalEditor returns true for editors that need the terminal (vim, nvim, nano, etc.)
+// as opposed to GUI editors (code, cursor, zed) that run in their own window.
+func isTerminalEditor(editor string) bool {
+	switch editor {
+	case "vim", "vi", "nvim", "nano", "micro", "helix", "hx", "emacs", "joe", "ne":
+		return true
+	}
+	return false
+}
 
 // editorCommand builds an exec.Cmd for the given editor binary, path, and optional line number.
 func editorCommand(editor, path string, line int) *exec.Cmd {
@@ -25,7 +32,7 @@ func editorCommand(editor, path string, line int) *exec.Cmd {
 		switch editor {
 		case "code", "cursor", "codium", "zed":
 			return exec.Command(editor, "-g", fmt.Sprintf("%s:%d", path, line))
-		case "vim", "vi", "nvim", "nano":
+		case "vim", "vi", "nvim", "nano", "micro", "helix", "hx", "emacs":
 			return exec.Command(editor, fmt.Sprintf("+%d", line), path)
 		default:
 			return exec.Command(editor, path)
@@ -43,122 +50,71 @@ func (m *model) editorList() []string {
 	return editors
 }
 
-func (m *model) openFile(path string) tea.Cmd {
-	return func() tea.Msg {
-		filename := filepath.Base(path)
+// findEditor returns the first available editor from the editor list.
+func (m *model) findEditor() (string, bool) {
+	for _, editor := range m.editorList() {
+		if _, err := exec.LookPath(editor); err == nil {
+			return editor, true
+		}
+	}
+	return "", false
+}
 
-		// Try to open with default application
-		var cmd *exec.Cmd
-		var foundEditor bool
+// execEditor opens a file in the user's editor. Terminal editors (vim, nvim, nano, etc.)
+// use tea.ExecProcess to properly suspend the TUI. GUI editors use cmd.Start().
+func (m *model) execEditor(path string, line int) tea.Cmd {
+	editor, found := m.findEditor()
+	if !found {
+		m.statusMsg = "no editor found in path"
+		m.statusExpiry = time.Now().Add(3 * time.Second)
+		return nil
+	}
 
-		switch {
-		case utils.IsCodeFile(path):
-			for _, editor := range m.editorList() {
-				if _, err := exec.LookPath(editor); err == nil {
-					cmd = editorCommand(editor, path, 0)
-					foundEditor = true
-					break
-				}
-			}
-			if !foundEditor {
-				return fileOpenResultMsg{
-					success: false,
-					message: fmt.Sprintf("Can't open %s via scout", filename),
-					path:    path,
-				}
-			}
-		default:
-			// Use system default opener (handles Linux/macOS/Windows automatically)
-			err := open.Run(path)
+	cmd := editorCommand(editor, path, line)
+	filename := filepath.Base(path)
+
+	if isTerminalEditor(editor) {
+		return tea.ExecProcess(cmd, func(err error) tea.Msg {
 			if err != nil {
 				return fileOpenResultMsg{
 					success: false,
-					message: fmt.Sprintf("Can't open %s via scout", filename),
+					message: fmt.Sprintf("Editor error: %s", err),
 					path:    path,
 				}
 			}
 			return fileOpenResultMsg{
 				success: true,
-				message: fmt.Sprintf("Opened %s", filename),
+				message: fmt.Sprintf("Closed %s", editor),
 				path:    path,
 			}
-		}
-
-		if cmd != nil {
-			err := cmd.Start()
-			if err != nil {
-				return fileOpenResultMsg{
-					success: false,
-					message: fmt.Sprintf("Can't open %s via scout", filename),
-					path:    path,
-				}
-			}
-		}
-
-		return fileOpenResultMsg{
-			success: true,
-			message: fmt.Sprintf("Opened %s", filename),
-			path:    path,
-		}
+		})
 	}
-}
 
-func (m *model) editFile(path string) tea.Cmd {
-	return m.editFileAtLine(path, 0)
-}
-
-func (m *model) editFileAtLine(path string, line int) tea.Cmd {
-	return func() tea.Msg {
-		for _, editor := range m.editorList() {
-			if _, err := exec.LookPath(editor); err == nil {
-				cmd := editorCommand(editor, path, line)
-				cmd.Stdin = os.Stdin
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-				cmd.Run()
-				break
-			}
-		}
-		return nil
-	}
-}
-
-func (m *model) openInEditor(path string) tea.Cmd {
-	return func() tea.Msg {
-		for _, editor := range m.editorList() {
-			if _, err := exec.LookPath(editor); err == nil {
-				cmd := editorCommand(editor, path, 0)
-				cmd.Start()
-				m.statusMsg = fmt.Sprintf("opening %s in %s", filepath.Base(path), editor)
-				m.statusExpiry = time.Now().Add(2 * time.Second)
-				return nil
-			}
-		}
-		m.statusMsg = "no editor found in path"
+	// GUI editor — launch in background
+	err := cmd.Start()
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("Can't open %s via scout", filename)
 		m.statusExpiry = time.Now().Add(3 * time.Second)
 		return nil
 	}
+	m.statusMsg = fmt.Sprintf("opening %s in %s", filename, editor)
+	m.statusExpiry = time.Now().Add(2 * time.Second)
+	return nil
+}
+
+func (m *model) openInEditor(path string) tea.Cmd {
+	return m.execEditor(path, 0)
 }
 
 func (m *model) openExternalWithFallback(path string, line int) tea.Cmd {
+	_, found := m.findEditor()
+	if found {
+		return m.execEditor(path, line)
+	}
+
+	// No editor found — fall back to system default opener
+	filename := filepath.Base(path)
 	return func() tea.Msg {
-		filename := filepath.Base(path)
-
-		for _, editor := range m.editorList() {
-			if _, err := exec.LookPath(editor); err == nil {
-				cmd := editorCommand(editor, path, line)
-				err := cmd.Start()
-				if err == nil {
-					return fileOpenResultMsg{
-						success: true,
-						message: fmt.Sprintf("Opened %s in %s", filename, editor),
-						path:    path,
-					}
-				}
-			}
-		}
-
-		// No editor found - fall back to system default opener
 		err := open.Run(path)
 		if err != nil {
 			return fileOpenResultMsg{

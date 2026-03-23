@@ -919,7 +919,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = m.previousMode
 				m.helpScroll = 0
 				return m, nil
-			case "j", "down":
+			case "j", "down", "s":
 				maxScroll := helpContentLines - (m.height - uiOverhead - 2)
 				if maxScroll < 0 {
 					maxScroll = 0
@@ -928,13 +928,20 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.helpScroll++
 				}
 				return m, nil
-			case "k", "up":
+			case "k", "up", "w":
 				if m.helpScroll > 0 {
 					m.helpScroll--
 				}
 				return m, nil
 			case "g":
 				m.helpScroll = 0
+				return m, nil
+			case "G":
+				maxScroll := helpContentLines - (m.height - uiOverhead - 2)
+				if maxScroll < 0 {
+					maxScroll = 0
+				}
+				m.helpScroll = maxScroll
 				return m, nil
 			}
 			return m, nil
@@ -1200,12 +1207,29 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.gitBranch = git.GetBranch(m.currentDir)
 							m.updatePreview()
 						} else if !selected.isDir {
-							// Open file with smart fallback
-							if m.currentSearchType == searchContent {
-								lineNum := int(selected.size) // Line number stored in size field
-								return m, m.openExternalWithFallback(selected.path, lineNum)
-							}
-							return m, m.openExternalWithFallback(selected.path, 0)
+							// Navigate to the file's parent directory (same as 'f' key)
+							m.cancelCurrentSearch()
+							m.loading = false
+							targetDir := filepath.Dir(selected.path)
+
+							m.mode = modeNormal
+							m.searchResultsLocked = false
+							m.searchInput.SetValue("")
+							m.recursiveSearch = false
+							m.currentSearchType = searchFilename
+
+							orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+							m.statusMsg = orangeStyle.Render("exited search")
+							m.statusExpiry = time.Now().Add(2 * time.Second)
+
+							m.addToHistory(targetDir)
+							m.currentDir = targetDir
+							m.cursor = 0
+							m.scrollOffset = 0
+							m.previewScroll = 0
+							m.loadFiles()
+							m.refreshGitStatus()
+							m.updatePreview()
 						}
 					}
 					return m, nil
@@ -1486,6 +1510,28 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else if filterCmd != nil {
 					return m, filterCmd
 				}
+				return m, cmd
+
+			case "ctrl+p":
+				// Toggle preview panel (works locked or unlocked)
+				m.showPreview = !m.showPreview
+				return m, nil
+
+			case "ctrl+n":
+				// Toggle search target: path vs name-only
+				if m.searchResultsLocked {
+					return m, nil
+				}
+				m.searchNameOnly = !m.searchNameOnly
+				if m.searchNameOnly {
+					m.statusMsg = "search: name only"
+				} else {
+					m.statusMsg = "search: full path"
+				}
+				m.statusExpiry = time.Now().Add(2 * time.Second)
+				// Re-run the current search with the new mode
+				cmd = m.updateFilter()
+				m.updatePreview()
 				return m, cmd
 
 			case "ctrl+g":
@@ -2052,16 +2098,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 					selected := m.filteredFiles[m.cursor]
 					if selected.isDir {
-						// Prevent backing out of WSL home directory
-						if selected.name == ".." {
-							homeDir, _ := os.UserHomeDir()
-							if strings.HasPrefix(m.currentDir, homeDir) && !strings.HasPrefix(selected.path, homeDir) {
-								m.statusMsg = "cannot navigate above home directory (use ` to jump to windows c:)"
-								m.statusExpiry = time.Now().Add(3 * time.Second)
-								break
-							}
-						}
-						m.addToHistory(selected.path)
+							m.addToHistory(selected.path)
 						m.currentDir = selected.path
 						m.cursor = 0
 						m.scrollOffset = 0
@@ -2080,14 +2117,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "esc", "h", "left":
 				parentDir := filepath.Dir(m.currentDir)
-
-				// Prevent backing out of WSL home directory
-				homeDir, _ := os.UserHomeDir()
-				if strings.HasPrefix(m.currentDir, homeDir) && !strings.HasPrefix(parentDir, homeDir) {
-					m.statusMsg = "cannot navigate above home directory (use ` to jump to windows c:)"
-					m.statusExpiry = time.Now().Add(3 * time.Second)
-					break
-				}
 
 				// Check if we can go up (respect root path and filesystem root)
 				if m.currentDir != "/" && m.currentDir != m.config.RootPath &&
@@ -2190,28 +2219,36 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 
 			case "~":
-				home, _ := os.UserHomeDir()
-				m.addToHistory(home)
-				m.currentDir = home
+				target := ""
+				if m.config.RootPath != "" {
+					target = m.config.RootPath
+				} else {
+					target, _ = os.UserHomeDir()
+				}
+				m.addToHistory(target)
+				m.currentDir = target
 				m.cursor = 0
 				m.scrollOffset = 0
 				m.previewScroll = 0
 				m.loadFiles()
 
 			case "`":
-				// Jump to Windows C: drive (WSL /mnt/c)
-				windowsC := "/mnt/c"
-				if _, err := os.Stat(windowsC); err == nil {
-					m.addToHistory(windowsC)
-					m.currentDir = windowsC
-					m.cursor = 0
-					m.scrollOffset = 0
-					m.previewScroll = 0
-					m.loadFiles()
-				} else {
-					m.statusMsg = "/mnt/c not available (not in WSL or drive not mounted)"
-					m.statusExpiry = time.Now().Add(3 * time.Second)
+				// Jump to /mnt/c (WSL) or / (non-WSL) — disabled when root is locked
+				if m.config.RootPath != "" {
+					m.statusMsg = "navigation restricted to " + filepath.Base(m.config.RootPath)
+					m.statusExpiry = time.Now().Add(2 * time.Second)
+					break
 				}
+				target := "/"
+				if _, err := os.Stat("/mnt/c"); err == nil {
+					target = "/mnt/c"
+				}
+				m.addToHistory(target)
+				m.currentDir = target
+				m.cursor = 0
+				m.scrollOffset = 0
+				m.previewScroll = 0
+				m.loadFiles()
 
 			case "b":
 				m.mode = modeBookmarks

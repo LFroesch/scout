@@ -13,7 +13,7 @@ go install github.com/LFroesch/scout@latest
 Or grab a binary from [Releases](https://github.com/LFroesch/scout/releases). There's also an install script:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/LFroesch/scout/main/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/LFroesch/scout/main/install.sh | bash
 ```
 
 ## Usage
@@ -46,12 +46,16 @@ Press `?` in-app for the full list.
 | `j/k`, `up/down` | Navigate |
 | `enter/l/right` | Open dir/file |
 | `esc/h/left` | Parent dir |
+| `f` | Navigate to dir (or parent of file) |
 | `g/G` | First/last item |
 | `ctrl+d/u` | Half-page scroll |
 | `ctrl+f/b` | Full-page scroll |
 | `~` | Home directory |
+| `` ` `` | Jump to /mnt/c (WSL) or / (Linux) |
 | `/` | Search |
-| `Tab` (in search) | Cycle: Dir / Recursive / Content |
+| `Tab` (in search) | Cycle: Dir / Recursive / Content / Ultra |
+| `ctrl+p` (in search) | Toggle preview panel |
+| `ctrl+n` (in search) | Toggle name-only / full-path search |
 | `S` | Cycle sort: Name/Size/Date/Type |
 | `.` | Toggle hidden files |
 | `o` | Open in editor |
@@ -63,8 +67,9 @@ Press `?` in-app for the full list.
 | `u` | Undo delete |
 | `R` | Rename |
 | `N/M` | New file/directory |
+| `r` | Refresh current view |
 | `b/B` | View/add bookmarks |
-| `alt+up/down` | Scroll preview |
+| `w/s`, `alt+up/down` | Scroll preview |
 | `,` | Open config |
 | `?` | Help |
 | `q/ctrl+c` | Quit |
@@ -72,12 +77,13 @@ Press `?` in-app for the full list.
 
 ## What it does
 
-- **Search** with `/`. Searches current dir by default, `Tab` cycles to recursive and content search (needs [ripgrep](https://github.com/BurntSushi/ripgrep)). There's also an ultra mode that searches all mounted drives.
+- **Search** with `/`. `Tab` cycles through four modes: current dir, recursive, content search (needs [ripgrep](https://github.com/BurntSushi/ripgrep)), and ultra (all mounted drives). Press `Enter` to lock results for navigation, then browse/open files without losing your search.
 - **File preview** in a side panel. Scrollable, cached, handles text/code/binary detection.
-- **File operations**: create, rename, delete (trash-based with undo), copy/cut/paste.
+- **File operations**: create, rename, delete (trash-based with undo), copy/cut/paste. Multi-file clipboard with `C`/`X`.
 - **Git awareness**: shows current branch and marks modified files with `[M]`.
 - **Bookmarks** sorted by frecency (how often + how recently you visit them).
 - **Configurable**: editor, search depth/limits, skip directories, hidden files default. Press `,` to edit config.
+- **Mouse support**: single-click selects, double-click opens, middle-click navigates to directory, scroll wheel works everywhere.
 
 ## Configuration
 
@@ -89,9 +95,9 @@ Config file: `~/.config/scout/scout-config.json` (press `,` to open it)
   "maxResults": 5000,
   "maxDepth": 5,
   "maxFilesScanned": 100000,
-  "root_path": "/home/user",
+  "root_path": "",
   "bookmarks": ["/home/user/projects"],
-  "show_hidden": false,
+  "show_hidden": true,
   "preview_enabled": true,
   "editor": "nvim"
 }
@@ -99,11 +105,13 @@ Config file: `~/.config/scout/scout-config.json` (press `,` to open it)
 
 | Key | What it does | Default |
 |-----|-------------|---------|
-| `skip_directories` | Dirs to skip in search (wildcards ok) | common dev dirs |
+| `skip_directories` | Dirs to skip in search. Supports exact names (`node_modules`), wildcards (`Python*`), and absolute paths (`/usr/bin`) | ~60 common dirs |
 | `maxResults` | Max search results | 5000 |
 | `maxDepth` | Recursive search depth | 5 |
 | `maxFilesScanned` | Max files to scan per search | 100000 |
-| `root_path` | Can't navigate above this | `$HOME` |
+| `root_path` | Can't navigate above this (empty = no limit) | `""` |
+| `show_hidden` | Show dotfiles by default | `true` |
+| `preview_enabled` | Show preview panel on startup | `true` |
 | `editor` | Your editor (falls back to code/vim/nano/vi) | — |
 
 ## Platform Support
@@ -114,3 +122,7 @@ Built and tested on Linux and WSL. Should work on macOS but haven't tested it. F
 
 - [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) for content search
 - `gio` or `trash-put` for trash-based delete with undo
+
+## License
+
+[AGPL-3.0](LICENSE)
