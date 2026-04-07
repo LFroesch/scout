@@ -804,16 +804,23 @@ func (m *model) renderPreview(width int) string {
 			lines = append(lines, "▲")
 		}
 
-		// Truncate each line to fit panel width to prevent wrapping
+		// Word-wrap long lines to fit panel width without losing content
 		maxLineWidth := width - 6 // Account for borders and padding
 		for _, line := range m.previewLines[startIdx:endIdx] {
-			if len(line) > maxLineWidth {
-				runes := []rune(line)
-				if len(runes) > maxLineWidth-3 {
-					line = string(runes[:maxLineWidth-3]) + "..."
+			runes := []rune(line)
+			for len(runes) > maxLineWidth {
+				// Find last space within maxLineWidth for word break
+				breakAt := maxLineWidth
+				for i := maxLineWidth - 1; i > 0; i-- {
+					if runes[i] == ' ' || runes[i] == '\t' {
+						breakAt = i + 1
+						break
+					}
 				}
+				lines = append(lines, string(runes[:breakAt]))
+				runes = runes[breakAt:]
 			}
-			lines = append(lines, line)
+			lines = append(lines, string(runes))
 		}
 
 		if hasBottomIndicator {

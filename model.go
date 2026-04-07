@@ -70,7 +70,7 @@ const (
 	configSaveInterval  = 10                     // Save config every N directory visits
 	maxPreviewCacheSize = 50                     // Maximum number of file previews to cache
 	gitStatusCacheTTL   = 5 * time.Second        // Git status cache validity duration
-	helpContentLines    = 50                     // Total lines in help view (update if help content changes)
+	helpContentLines    = 78                     // Total lines in help view (update if help content changes)
 )
 
 type mode int
@@ -1028,7 +1028,7 @@ func (m *model) previewFile(path string) string {
 	preview.WriteString(fmt.Sprintf("%s %s\n", icon, filepath.Base(path)))
 	preview.WriteString(fmt.Sprintf("Path: %s\n", path))
 	preview.WriteString(fmt.Sprintf("Size: %s\n", utils.FormatFileSizeColored(info.Size())))
-	preview.WriteString(fmt.Sprintf("Modified: %s\n", info.ModTime().Format("Jan 2, 2006 15:04")))
+	preview.WriteString(fmt.Sprintf("Modified: %s\n", info.ModTime().Format("Jan 2, 2006 3:04 PM")))
 	preview.WriteString(fmt.Sprintf("Permissions: %s\n", info.Mode().String()))
 
 	if m.gitModified[path] {
