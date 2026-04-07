@@ -196,7 +196,7 @@ type model struct {
 	scannedFiles         int                   // Number of files scanned in current search
 	searchNameOnly       bool                  // Match filename only vs full path
 	searchResultsLocked  bool                  // Whether search results are locked for navigation
-	searchResultChan     chan tea.Msg           // Channel for receiving search progress (ultra search only)
+	searchResultChan     chan tea.Msg          // Channel for receiving search progress (ultra search only)
 	searchShared         *sharedSearchResults  // Shared state polled by ticker (non-ultra searches)
 	previousMode         mode                  // Mode to return to after sub-mode (rename, delete, help)
 }

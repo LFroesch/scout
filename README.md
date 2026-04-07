@@ -7,6 +7,12 @@ Navigate your filesystem with vim keys, search across directories, preview files
 ## Install
 
 ```bash
+make install
+```
+
+Or via go:
+
+```bash
 go install github.com/LFroesch/scout@latest
 ```
 
