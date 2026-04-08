@@ -1996,8 +1996,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 
 			case "ctrl+g":
-				// Exit and cd to current directory (requires shell integration, see ? help)
-				m.writeLastDir(m.currentDir)
+				// Exit and cd to selected dir, or current directory (requires shell integration, see ? help)
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) && m.filteredFiles[m.cursor].isDir {
+					m.writeLastDir(m.filteredFiles[m.cursor].path)
+				} else {
+					m.writeLastDir(m.currentDir)
+				}
 				return m, tea.Quit
 
 			case "j", "down":
