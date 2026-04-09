@@ -40,3 +40,7 @@ platform-detection-plan.md
 WORK.md
 agent_spec.md
 CLAUDE.md
+# Allow release workflow even when .github is globally ignored
+!.github/
+!.github/workflows/
+!.github/workflows/release.yml

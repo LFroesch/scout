@@ -4,6 +4,33 @@ TUI file explorer for the terminal. Built with Go and [Bubble Tea](https://githu
 
 Navigate your filesystem with vim keys, search across directories, preview files, manage bookmarks, and do basic file ops without leaving the terminal.
 
+## Quick Install
+
+Recommended (installs to `~/.local/bin`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LFroesch/scout/main/install.sh | bash
+```
+
+Or download a binary from [GitHub Releases](https://github.com/LFroesch/scout/releases).
+
+Or install with Go:
+
+```bash
+go install github.com/LFroesch/scout@latest
+```
+
+Or build from source:
+
+```bash
+make install
+```
+
+Command:
+
+```bash
+scout
+```
 ## Install
 
 ```bash

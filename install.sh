@@ -3,113 +3,100 @@ set -euo pipefail
 
 REPO="LFroesch/scout"
 BINARY_NAME="scout"
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 error() {
-    echo -e "${RED}Error: $1${NC}" >&2
-    exit 1
-}
-
-info() {
-    echo -e "${GREEN}$1${NC}"
+  echo "Error: $1" >&2
+  exit 1
 }
 
 warn() {
-    echo -e "${YELLOW}$1${NC}"
+  echo "Warning: $1" >&2
 }
 
-# Detect OS and architecture
 detect_platform() {
-    local os arch
+  local os arch
 
-    case "$(uname -s)" in
-        Linux*)     os="linux" ;;
-        Darwin*)    os="darwin" ;;
-        MINGW*|MSYS*|CYGWIN*) os="windows" ;;
-        *)          error "Unsupported OS: $(uname -s)" ;;
-    esac
+  case "$(uname -s)" in
+    Linux*) os="linux" ;;
+    Darwin*) os="darwin" ;;
+    MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+    *) error "Unsupported OS: $(uname -s)" ;;
+  esac
 
-    case "$(uname -m)" in
-        x86_64|amd64)   arch="amd64" ;;
-        aarch64|arm64)  arch="arm64" ;;
-        *)              error "Unsupported architecture: $(uname -m)" ;;
-    esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch="amd64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *) error "Unsupported architecture: $(uname -m)" ;;
+  esac
 
-    echo "${os}-${arch}"
+  echo "${os}-${arch}"
 }
 
-# Get latest release tag from GitHub
 get_latest_version() {
-    curl -sL "https://api.github.com/repos/${REPO}/releases/latest" \
-        | grep '"tag_name":' \
-        | sed -E 's/.*"([^"]+)".*/\1/' \
-        || error "Failed to fetch latest version"
+  curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest"     | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p'     | head -n1
 }
 
-# Main installation
+verify_checksum() {
+  local file="$1"
+  local checksums_file="$2"
+  local expected
+
+  expected="$(awk -v name="$(basename "$file")" '$2 == name { print $1 }' "$checksums_file")"
+  if [ -z "$expected" ]; then
+    warn "No checksum entry found for $(basename "$file"); skipping verification"
+    return 0
+  fi
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    local actual
+    actual="$(sha256sum "$file" | awk '{print $1}')"
+    [ "$actual" = "$expected" ] || error "Checksum verification failed"
+  elif command -v shasum >/dev/null 2>&1; then
+    local actual
+    actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+    [ "$actual" = "$expected" ] || error "Checksum verification failed"
+  else
+    warn "No SHA256 tool found; skipping checksum verification"
+  fi
+}
+
 main() {
-    info "Installing Scout..."
+  local platform version binary_file base_url tmp_dir tmp_bin tmp_checksums
 
-    # Detect platform
-    PLATFORM=$(detect_platform)
-    info "Detected platform: $PLATFORM"
+  platform="$(detect_platform)"
+  version="${VERSION:-$(get_latest_version)}"
+  [ -n "$version" ] || error "Unable to resolve release version"
 
-    # Get latest version
-    VERSION=$(get_latest_version)
-    info "Latest version: $VERSION"
+  if [[ "$platform" == windows* ]]; then
+    binary_file="${BINARY_NAME}-${platform}.exe"
+  else
+    binary_file="${BINARY_NAME}-${platform}"
+  fi
 
-    # Determine binary name based on OS
-    if [[ "$PLATFORM" == windows* ]]; then
-        BINARY_FILE="${BINARY_NAME}-${PLATFORM}.exe"
-    else
-        BINARY_FILE="${BINARY_NAME}-${PLATFORM}"
-    fi
+  base_url="https://github.com/${REPO}/releases/download/${version}"
 
-    # Download binary
-    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY_FILE}"
-    info "Downloading from: $DOWNLOAD_URL"
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' EXIT
 
-    TEMP_FILE=$(mktemp)
-    if ! curl -sL "$DOWNLOAD_URL" -o "$TEMP_FILE"; then
-        rm -f "$TEMP_FILE"
-        error "Failed to download binary"
-    fi
+  tmp_bin="$tmp_dir/$binary_file"
+  tmp_checksums="$tmp_dir/checksums.txt"
 
-    # Determine install location
-    if [[ -w "/usr/local/bin" ]]; then
-        INSTALL_DIR="/usr/local/bin"
-    elif [[ -d "$HOME/.local/bin" ]]; then
-        INSTALL_DIR="$HOME/.local/bin"
-    else
-        mkdir -p "$HOME/.local/bin"
-        INSTALL_DIR="$HOME/.local/bin"
-        warn "Created $HOME/.local/bin - add it to your PATH if not already there"
-    fi
+  curl -fsSL "${base_url}/${binary_file}" -o "$tmp_bin" || error "Failed to download ${binary_file}"
+  if curl -fsSL "${base_url}/checksums.txt" -o "$tmp_checksums"; then
+    verify_checksum "$tmp_bin" "$tmp_checksums"
+  else
+    warn "checksums.txt not found; skipping checksum verification"
+  fi
 
-    # Install binary
-    INSTALL_PATH="$INSTALL_DIR/$BINARY_NAME"
-    if [[ -w "$INSTALL_DIR" ]]; then
-        mv "$TEMP_FILE" "$INSTALL_PATH"
-    else
-        sudo mv "$TEMP_FILE" "$INSTALL_PATH" || error "Failed to move binary (try running with sudo)"
-    fi
+  mkdir -p "$INSTALL_DIR"
+  install -m 0755 "$tmp_bin" "$INSTALL_DIR/$BINARY_NAME"
 
-    chmod +x "$INSTALL_PATH"
-
-    info "✓ Scout installed successfully to $INSTALL_PATH"
-    info "Run 'scout' to get started!"
-
-    # Check if install dir is in PATH
-    if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-        warn "Note: $INSTALL_DIR is not in your PATH"
-        warn "Add this line to your shell config (~/.bashrc, ~/.zshrc, etc.):"
-        echo "  export PATH=\"\$PATH:$INSTALL_DIR\""
-    fi
+  echo "Installed $BINARY_NAME to $INSTALL_DIR/$BINARY_NAME"
+  if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
+    warn "$INSTALL_DIR is not in PATH"
+    warn "Add this to your shell config: export PATH=\"$PATH:$INSTALL_DIR\""
+  fi
 }
 
 main
