@@ -33,12 +33,6 @@ Command:
 ```bash
 scout
 ```
-## Usage
-
-```bash
-scout            # open in current directory
-scout /some/path # open in specific directory
-```
 
 ## Shell CD Integration
 
