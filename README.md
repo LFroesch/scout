@@ -33,24 +33,6 @@ Command:
 ```bash
 scout
 ```
-## Install
-
-```bash
-make install
-```
-
-Or via go:
-
-```bash
-go install github.com/LFroesch/scout@latest
-```
-
-Or grab a binary from [Releases](https://github.com/LFroesch/scout/releases). There's also an install script:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/LFroesch/scout/main/install.sh | bash
-```
-
 ## Usage
 
 ```bash
