@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -42,9 +43,11 @@ func editorCommand(editor, path string, line int) *exec.Cmd {
 }
 
 func (m *model) editorList() []string {
-	editors := []string{}
-	if m.config.Editor != "" {
-		editors = append(editors, m.config.Editor)
+	var editors []string
+	if v := os.Getenv("VISUAL"); v != "" {
+		editors = append(editors, v)
+	} else if v := os.Getenv("EDITOR"); v != "" {
+		editors = append(editors, v)
 	}
 	editors = append(editors, "code", "vim", "nano", "vi")
 	return editors

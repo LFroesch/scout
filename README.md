@@ -109,8 +109,7 @@ Config file: `~/.config/scout/scout-config.json` (press `,` to open it)
   "root_path": "",
   "bookmarks": ["/home/user/projects"],
   "show_hidden": true,
-  "preview_enabled": true,
-  "editor": "nvim"
+  "preview_enabled": true
 }
 ```
 
@@ -123,7 +122,17 @@ Config file: `~/.config/scout/scout-config.json` (press `,` to open it)
 | `root_path` | Can't navigate above this (empty = no limit) | `""` |
 | `show_hidden` | Show dotfiles by default | `true` |
 | `preview_enabled` | Show preview panel on startup | `true` |
-| `editor` | Your editor (falls back to code/vim/nano/vi) | — |
+
+### Editor
+
+Scout uses `$VISUAL` → `$EDITOR` → probes for `code`, `vim`, `nano`, `vi`.
+
+```bash
+export EDITOR=nvim      # terminal editor
+export VISUAL=cursor    # GUI editor (checked first)
+```
+
+Add to your `~/.zshrc` or `~/.bashrc` and it will work across all TUI apps.
 
 ## Platform Support
 

@@ -45,7 +45,6 @@ func TestSaveAndLoadConfig(t *testing.T) {
 		Bookmarks:      []string{"/test/path1", "/test/path2"},
 		ShowHidden:     true,
 		PreviewEnabled: false,
-		Editor:         "vim",
 		Frecency:       map[string]int{"/test/path1": 5},
 		LastVisited:    map[string]string{"/test/path1": "2026-01-09T12:00:00Z"},
 	}
@@ -70,10 +69,6 @@ func TestSaveAndLoadConfig(t *testing.T) {
 
 	if loadedCfg.PreviewEnabled != cfg.PreviewEnabled {
 		t.Errorf("PreviewEnabled mismatch: got %v, want %v", loadedCfg.PreviewEnabled, cfg.PreviewEnabled)
-	}
-
-	if loadedCfg.Editor != cfg.Editor {
-		t.Errorf("Editor mismatch: got %s, want %s", loadedCfg.Editor, cfg.Editor)
 	}
 
 	// Note: bookmarks might have root path added, so check for minimum length

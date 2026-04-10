@@ -19,7 +19,6 @@ type Config struct {
 	Bookmarks       []string          `json:"bookmarks"`
 	ShowHidden      bool              `json:"show_hidden"`
 	PreviewEnabled  bool              `json:"preview_enabled"`
-	Editor          string            `json:"editor"`
 	Frecency        map[string]int    `json:"frecency"`
 	LastVisited     map[string]string `json:"last_visited"` // path -> timestamp
 }
@@ -46,7 +45,6 @@ func Load() *Config {
 		Bookmarks:       []string{homeDir, "/mnt"},
 		ShowHidden:      true,
 		PreviewEnabled:  true,
-		Editor:          "",
 		Frecency:        make(map[string]int),
 		LastVisited:     make(map[string]string),
 		MaxResults:      5000,
@@ -58,7 +56,6 @@ func Load() *Config {
 	// Try to load existing config
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		// Save default config and return it
 		if err := Save(defaultConfig); err != nil {
 			logger.Warn("Failed to save default config: %v", err)
 		}

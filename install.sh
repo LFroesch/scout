@@ -62,7 +62,7 @@ verify_checksum() {
 }
 
 main() {
-  local platform version binary_file base_url tmp_dir tmp_bin tmp_checksums
+  local platform version binary_file base_url tmp_bin tmp_checksums
 
   platform="$(detect_platform)"
   version="${VERSION:-$(get_latest_version)}"
