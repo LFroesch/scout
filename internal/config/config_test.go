@@ -30,6 +30,10 @@ func TestLoadDefaultConfig(t *testing.T) {
 	if len(cfg.Bookmarks) == 0 {
 		t.Error("Default bookmarks not set")
 	}
+
+	if cfg.ShowHidden {
+		t.Error("expected hidden files to be off by default")
+	}
 }
 
 func TestSaveAndLoadConfig(t *testing.T) {

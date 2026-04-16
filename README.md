@@ -36,7 +36,7 @@ scout
 
 ## Shell CD Integration
 
-`ctrl+g` exits scout and cds your shell to wherever you were browsing. Add this wrapper to your `.zshrc` / `.bashrc`:
+`ctrl+g` exits scout and cds your shell to the selected directory. If a file is selected, it cds to that file's parent directory. If the `..` row is selected, it stays in the directory you're currently browsing. Add this wrapper to your `.zshrc` / `.bashrc`:
 
 ```zsh
 function scout() {
@@ -84,11 +84,11 @@ Press `?` in-app for the full list.
 | `,` | Open config |
 | `?` | Help |
 | `q/ctrl+c` | Quit |
-| `ctrl+g` | Quit + cd (see above) |
+| `ctrl+g` | Quit + cd to selected/current dir (see above) |
 
 ## What it does
 
-- **Search** with `/`. `Tab` cycles through four modes: current dir, recursive, content search (needs [ripgrep](https://github.com/BurntSushi/ripgrep)), and ultra (all mounted drives). Press `Enter` to lock results for navigation, then browse/open files without losing your search.
+- **Search** with `/`. `Tab` cycles through four modes: current dir, recursive, content search (needs [ripgrep](https://github.com/BurntSushi/ripgrep)), and ultra (all mounted drives). Press `Enter` to lock results for navigation, then browse/open files without losing your search. Locked search navigation now follows the same directory behavior as the main list, including the `..` parent entry.
 - **File preview** in a side panel. Scrollable, cached, handles text/code/binary detection.
 - **File operations**: create, rename, delete (trash-based with undo), copy/cut/paste. Multi-file clipboard with `C`/`X`.
 - **Git awareness**: shows current branch and marks modified files with `[M]`.
@@ -108,7 +108,7 @@ Config file: `~/.config/scout/scout-config.json` (press `,` to open it)
   "maxFilesScanned": 100000,
   "root_path": "",
   "bookmarks": ["/home/user/projects"],
-  "show_hidden": true,
+  "show_hidden": false,
   "preview_enabled": true
 }
 ```
@@ -120,7 +120,7 @@ Config file: `~/.config/scout/scout-config.json` (press `,` to open it)
 | `maxDepth` | Recursive search depth | 5 |
 | `maxFilesScanned` | Max files to scan per search | 100000 |
 | `root_path` | Can't navigate above this (empty = no limit) | `""` |
-| `show_hidden` | Show dotfiles by default | `true` |
+| `show_hidden` | Show dotfiles by default | `false` |
 | `preview_enabled` | Show preview panel on startup | `true` |
 
 ### Editor

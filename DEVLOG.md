@@ -1,5 +1,22 @@
 ## DevLog
 
+### 2026-04-13 - ctrl+g back-row behavior cleanup
+- Fixed shell cd target resolution so `ctrl+g` treats the `..` row as "stay in the directory I'm browsing" instead of jumping to the parent
+- Reused the same target-dir logic in both normal mode and locked search mode
+- Added a focused unit test for the shell cd target helper and clarified the README/help copy
+- Files: helpers.go, helpers_test.go, update.go, view.go, README.md, WORK.md
+
+### 2026-04-13 - Search keybind audit and parent-entry fix
+- Audited search-mode keybind handling and added targeted tests for lock/unlock transitions, mode cycling, typed key passthrough, backspace unlock, and locked-result navigation
+- Fixed locked search navigation so `enter` and `f` now honor the `..` parent row instead of ignoring it
+- Fixed async recursive/content/ultra search to respect the hidden-file toggle instead of always including dotfiles
+- Files: model.go, update.go, update_search_test.go, README.md, WORK.md
+
+### 2026-04-13 - Hide dotfiles by default
+- Changed the default config so new installs start with hidden files off; `.` still toggles them on demand
+- Added a config test to lock in the new default and updated the README config examples
+- Files: internal/config/config.go, internal/config/config_test.go, README.md, WORK.md
+
 ### 2026-03-23 - Help screen navigation & hints
 - Added `w/s` as scroll aliases in help screen (alongside `j/k/up/down`)
 - Added `G` to jump to bottom of help (matching `g` for top)

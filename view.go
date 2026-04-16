@@ -1335,7 +1335,7 @@ func (m *model) renderHelpView() string {
 	allHelpContent = append(allHelpContent, helpLine("?", "show this help"))
 	allHelpContent = append(allHelpContent, helpLine(",", "open config file"))
 	allHelpContent = append(allHelpContent, helpLine("q / ctrl+c", "quit"))
-	allHelpContent = append(allHelpContent, helpLine("ctrl+g", "quit and cd to current directory"))
+	allHelpContent = append(allHelpContent, helpLine("ctrl+g", "quit and cd to selected/current dir"))
 	allHelpContent = append(allHelpContent, "")
 	allHelpContent = append(allHelpContent, sectionStyle.Render("SHELL CD INTEGRATION (ctrl+g):"))
 	allHelpContent = append(allHelpContent, "  Add this to ~/.zshrc or ~/.bashrc:")

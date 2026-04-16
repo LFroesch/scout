@@ -733,7 +733,7 @@ func (m *model) performAsyncSearch(query string) tea.Cmd {
 	// Capture the necessary state before going async
 	searchType := m.currentSearchType
 	currentDir := m.currentDir
-	showHidden := true // Always search hidden files - if you're searching, you want to find it
+	showHidden := m.showHidden
 	maxResults := m.config.MaxResults
 	maxDepth := m.config.MaxDepth
 	maxFilesScanned := m.config.MaxFilesScanned

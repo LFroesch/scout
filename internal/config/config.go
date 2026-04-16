@@ -43,7 +43,7 @@ func Load() *Config {
 	defaultConfig := &Config{
 		RootPath:        "", // Allow full filesystem access
 		Bookmarks:       []string{homeDir, "/mnt"},
-		ShowHidden:      true,
+		ShowHidden:      false,
 		PreviewEnabled:  true,
 		Frecency:        make(map[string]int),
 		LastVisited:     make(map[string]string),

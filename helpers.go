@@ -146,6 +146,18 @@ func (m *model) copyPath(path string) {
 	}
 }
 
+// ctrlGTargetDir returns the directory scout should write for shell cd integration.
+// ".." means "stay in the directory I'm currently browsing", not "go up one more level".
+func (m *model) ctrlGTargetDir(selected fileItem) string {
+	if selected.name == ".." {
+		return m.currentDir
+	}
+	if selected.isDir {
+		return selected.path
+	}
+	return filepath.Dir(selected.path)
+}
+
 // ensureCursorInBounds ensures cursor is within valid range and adjusts scroll to keep it visible
 func (m *model) ensureCursorInBounds() {
 	// Early return if no files

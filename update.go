@@ -1032,38 +1032,36 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.searchResultsLocked {
 					if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 						selected := m.filteredFiles[m.cursor]
-						if selected.name != ".." {
-							var targetDir string
-							if selected.isDir {
-								targetDir = selected.path
-							} else {
-								// Cancel any ongoing search
-								m.cancelCurrentSearch()
-								m.loading = false
-								targetDir = filepath.Dir(selected.path)
-							}
-
-							// Exit search mode and navigate
-							m.mode = modeNormal
-							m.searchResultsLocked = false
-							m.searchInput.SetValue("")
-							m.recursiveSearch = false
-							m.currentSearchType = searchFilename
-
-							// Show "exited search" status
-							orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
-							m.statusMsg = orangeStyle.Render("exited search")
-							m.statusExpiry = time.Now().Add(2 * time.Second)
-
-							m.addToHistory(targetDir)
-							m.currentDir = targetDir
-							m.cursor = 0
-							m.scrollOffset = 0
-							m.previewScroll = 0
-							m.loadFiles()
-							m.refreshGitStatus()
-							m.updatePreview()
+						var targetDir string
+						if selected.isDir {
+							targetDir = selected.path
+						} else {
+							// Cancel any ongoing search
+							m.cancelCurrentSearch()
+							m.loading = false
+							targetDir = filepath.Dir(selected.path)
 						}
+
+						// Exit search mode and navigate
+						m.mode = modeNormal
+						m.searchResultsLocked = false
+						m.searchInput.SetValue("")
+						m.recursiveSearch = false
+						m.currentSearchType = searchFilename
+
+						// Show "exited search" status
+						orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+						m.statusMsg = orangeStyle.Render("exited search")
+						m.statusExpiry = time.Now().Add(2 * time.Second)
+
+						m.addToHistory(targetDir)
+						m.currentDir = targetDir
+						m.cursor = 0
+						m.scrollOffset = 0
+						m.previewScroll = 0
+						m.loadFiles()
+						m.refreshGitStatus()
+						m.updatePreview()
 					}
 					return m, nil
 				}
@@ -1187,7 +1185,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.searchResultsLocked {
 					if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 						selected := m.filteredFiles[m.cursor]
-						if selected.isDir && selected.name != ".." {
+						if selected.isDir {
 							// Cancel search when navigating away from search mode
 							m.cancelCurrentSearch()
 							m.loading = false
@@ -1535,15 +1533,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 
 			case "ctrl+g":
-				// Exit and cd to directory containing selected item (or current dir)
+				// Exit and cd to the selected directory (or containing/current directory)
 				if m.searchResultsLocked && len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
-					selected := m.filteredFiles[m.cursor]
-					var targetDir string
-					if selected.isDir {
-						targetDir = selected.path
-					} else {
-						targetDir = filepath.Dir(selected.path)
-					}
+					targetDir := m.ctrlGTargetDir(m.filteredFiles[m.cursor])
 					m.cancelCurrentSearch()
 					m.writeLastDir(targetDir)
 				} else {
@@ -1996,9 +1988,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 
 			case "ctrl+g":
-				// Exit and cd to selected dir, or current directory (requires shell integration, see ? help)
-				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) && m.filteredFiles[m.cursor].isDir {
-					m.writeLastDir(m.filteredFiles[m.cursor].path)
+				// Exit and cd to selected/current directory (requires shell integration, see ? help)
+				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
+					m.writeLastDir(m.ctrlGTargetDir(m.filteredFiles[m.cursor]))
 				} else {
 					m.writeLastDir(m.currentDir)
 				}
@@ -2102,7 +2094,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 					selected := m.filteredFiles[m.cursor]
 					if selected.isDir {
-							m.addToHistory(selected.path)
+						m.addToHistory(selected.path)
 						m.currentDir = selected.path
 						m.cursor = 0
 						m.scrollOffset = 0
