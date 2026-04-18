@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/LFroesch/scout/internal/logger"
 )
 
 // Permission type for validation
@@ -154,11 +156,20 @@ func MoveToTrash(path string) error {
 func Delete(path string, isDir bool) error {
 	// Try to move to trash first
 	if err := MoveToTrash(path); err != nil {
+		logger.Warn("Trash failed for %s, falling back to permanent delete: %v", path, err)
 		// Fall back to permanent delete
 		if isDir {
-			return os.RemoveAll(path)
+			if rmErr := os.RemoveAll(path); rmErr != nil {
+				logger.Error("RemoveAll failed for %s: %v", path, rmErr)
+				return rmErr
+			}
+			return nil
 		}
-		return os.Remove(path)
+		if rmErr := os.Remove(path); rmErr != nil {
+			logger.Error("Remove failed for %s: %v", path, rmErr)
+			return rmErr
+		}
+		return nil
 	}
 	return nil
 }
@@ -246,7 +257,9 @@ func DeleteWithUndo(path string, isDir bool) (string, error) {
 	// Perform the deletion
 	if err := Delete(absPath, isDir); err != nil {
 		// Clean up undo info if deletion failed
-		os.Remove(infoPath)
+		if rmErr := os.Remove(infoPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			logger.Warn("Failed to remove orphan undo info %s: %v", infoPath, rmErr)
+		}
 		return "", err
 	}
 
@@ -292,11 +305,14 @@ func RestoreFromTrash(undoInfoPath, originalPath string) error {
 
 	// Move file back from trash
 	if err := os.Rename(info.TrashPath, info.OriginalPath); err != nil {
+		logger.Error("Restore %s -> %s failed: %v", info.TrashPath, info.OriginalPath, err)
 		return fmt.Errorf("failed to restore file: %v", err)
 	}
 
 	// Clean up undo info
-	os.Remove(undoInfoPath)
+	if err := os.Remove(undoInfoPath); err != nil && !os.IsNotExist(err) {
+		logger.Warn("Failed to clean up undo info %s: %v", undoInfoPath, err)
+	}
 
 	return nil
 }
@@ -317,6 +333,7 @@ func Rename(oldPath, newName string) error {
 	}
 
 	if err := os.Rename(oldPath, newPath); err != nil {
+		logger.Error("Rename %s -> %s failed: %v", oldPath, newPath, err)
 		return FormatError(err, oldPath, "rename")
 	}
 
@@ -339,6 +356,7 @@ func CreateFile(dir, name string) error {
 
 	file, err := os.Create(path)
 	if err != nil {
+		logger.Error("Create file %s failed: %v", path, err)
 		return FormatError(err, path, "create file")
 	}
 	return file.Close()
@@ -359,6 +377,7 @@ func CreateDir(dir, name string) error {
 	}
 
 	if err := os.Mkdir(path, 0755); err != nil {
+		logger.Error("Mkdir %s failed: %v", path, err)
 		return FormatError(err, path, "create directory")
 	}
 	return nil
@@ -426,6 +445,7 @@ func CopyMultiple(sources []string, destDir string) error {
 	for _, srcPath := range sources {
 		destPath := filepath.Join(destDir, filepath.Base(srcPath))
 		if err := CopyFileOrDir(srcPath, destPath); err != nil {
+			logger.Error("Copy %s -> %s failed: %v", srcPath, destPath, err)
 			return err
 		}
 	}
@@ -438,10 +458,13 @@ func MoveMultiple(sources []string, destDir string) error {
 		destPath := filepath.Join(destDir, filepath.Base(srcPath))
 		if err := os.Rename(srcPath, destPath); err != nil {
 			// If rename fails (cross-device), copy then delete
+			logger.Info("Rename %s -> %s failed (%v), falling back to copy+delete", srcPath, destPath, err)
 			if err := CopyFileOrDir(srcPath, destPath); err != nil {
+				logger.Error("Move fallback copy %s -> %s failed: %v", srcPath, destPath, err)
 				return err
 			}
 			if err := os.RemoveAll(srcPath); err != nil {
+				logger.Error("Move fallback cleanup RemoveAll %s failed: %v", srcPath, err)
 				return err
 			}
 		}

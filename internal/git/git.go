@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/LFroesch/scout/internal/logger"
 )
 
 // GetModifiedFiles returns a map of modified files in a git repository
@@ -14,6 +16,7 @@ func GetModifiedFiles(dir string) map[string]bool {
 	cmd := exec.Command("git", "rev-parse", "--git-dir")
 	cmd.Dir = dir
 	if err := cmd.Run(); err != nil {
+		// Not a git repo is the common case; don't log.
 		return modified
 	}
 
@@ -22,6 +25,7 @@ func GetModifiedFiles(dir string) map[string]bool {
 	cmd.Dir = dir
 	output, err := cmd.Output()
 	if err != nil {
+		logger.Warn("git status failed in %s: %v", dir, err)
 		return modified
 	}
 
@@ -46,6 +50,10 @@ func GetBranch(dir string) string {
 	cmd.Dir = dir
 	output, err := cmd.Output()
 	if err != nil {
+		// Usually means "not a git repo" — silent. Only log other failures.
+		if _, ok := err.(*exec.ExitError); !ok {
+			logger.Warn("git rev-parse failed in %s: %v", dir, err)
+		}
 		return ""
 	}
 	return strings.TrimSpace(string(output))

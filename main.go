@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -33,10 +34,26 @@ func main() {
 	}
 	defer logger.Close()
 
+	// SCOUT_LOG_LEVEL=debug|info|warn|error overrides the default Info level.
+	switch strings.ToLower(os.Getenv("SCOUT_LOG_LEVEL")) {
+	case "debug":
+		logger.SetLevel(logger.LevelDebug)
+	case "info", "":
+		// default
+	case "warn":
+		logger.SetLevel(logger.LevelWarn)
+	case "error":
+		logger.SetLevel(logger.LevelError)
+	}
+
+	cwd, _ := os.Getwd()
+	logger.Info("scout started: pid=%d cwd=%s root=%q", os.Getpid(), cwd, rootPath)
+
 	m := initialModel(rootPath)
 	p := tea.NewProgram(&m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		logger.Error("Program crashed: %v", err)
 		log.Fatal(err)
 	}
+	logger.Info("scout exited cleanly")
 }

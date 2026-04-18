@@ -1,5 +1,13 @@
 ## DevLog
 
+### 2026-04-18 - Logging levels and coverage
+- Added `Info`/`Debug` levels and `SetLevel` to the logger; defaults to `Info`
+- `SCOUT_LOG_LEVEL=debug|info|warn|error` env var overrides at startup
+- Demoted routine search progress from `Warn` to `Info` (bucket-misuse fix); kept `Warn`/`Error` for real problems
+- Added startup/exit banner (pid, cwd, root) so log rotations are correlatable
+- Added `logger.Error`/`Warn` to previously-silent error paths in `internal/fileops` (rename, create, mkdir, copy/move, trash fallback, undo cleanup) and `internal/git` (status/rev-parse)
+- Files: internal/logger/logger.go, internal/search/search.go, internal/fileops/fileops.go, internal/git/git.go, main.go
+
 ### 2026-04-13 - ctrl+g back-row behavior cleanup
 - Fixed shell cd target resolution so `ctrl+g` treats the `..` row as "stay in the directory I'm browsing" instead of jumping to the parent
 - Reused the same target-dir logic in both normal mode and locked search mode

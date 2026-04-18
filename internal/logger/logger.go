@@ -8,10 +8,23 @@ import (
 	"time"
 )
 
+// Level controls which messages get written. Messages below the current level are dropped.
+type Level int
+
+const (
+	LevelDebug Level = iota
+	LevelInfo
+	LevelWarn
+	LevelError
+)
+
 var (
 	logFile *os.File
 	mu      sync.Mutex
 	enabled = true
+	// Default to Info so routine progress is kept out of production logs.
+	// Raise to Debug via SetLevel when debugging.
+	minLevel = LevelInfo
 )
 
 const (
@@ -77,28 +90,45 @@ func Enable() {
 	enabled = true
 }
 
-// Error logs an error message
-func Error(format string, args ...any) {
-	log("ERROR", format, args...)
+// SetLevel sets the minimum level that will be written.
+func SetLevel(l Level) {
+	mu.Lock()
+	defer mu.Unlock()
+	minLevel = l
+}
+
+// Debug logs verbose diagnostic output. Dropped unless SetLevel(LevelDebug) is set.
+func Debug(format string, args ...any) {
+	log(LevelDebug, "DEBUG", format, args...)
+}
+
+// Info logs routine progress and lifecycle events.
+func Info(format string, args ...any) {
+	log(LevelInfo, "INFO", format, args...)
 }
 
 // Warn logs a warning message
 func Warn(format string, args ...any) {
-	log("WARN", format, args...)
+	log(LevelWarn, "WARN", format, args...)
+}
+
+// Error logs an error message
+func Error(format string, args ...any) {
+	log(LevelError, "ERROR", format, args...)
 }
 
 // log writes a log message to the file
-func log(level string, format string, args ...any) {
+func log(level Level, levelName string, format string, args ...any) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if !enabled || logFile == nil {
+	if !enabled || logFile == nil || level < minLevel {
 		return
 	}
 
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	message := fmt.Sprintf(format, args...)
-	logLine := fmt.Sprintf("[%s] %s: %s\n", timestamp, level, message)
+	logLine := fmt.Sprintf("[%s] %s: %s\n", timestamp, levelName, message)
 
 	logFile.WriteString(logLine)
 }

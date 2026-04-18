@@ -61,7 +61,7 @@ func shouldSkipDir(path, name string, skipDirs []string) bool {
 // Limits configurable via maxResults, maxDepth parameters
 // onResult is called for each result as it's found (may be nil)
 func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-chan struct{}, onResult func(Result), maxResults, maxDepth int, customSkipDirs []string) ([]Result, error) {
-	logger.Warn("Starting content search in %s for query '%s'", currentDir, query)
+	logger.Info("Starting content search in %s for query '%s'", currentDir, query)
 	startTime := time.Now()
 	// Try to find ripgrep binary
 	rgPath := ""
@@ -102,12 +102,12 @@ func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-c
 	args = append(args, query, currentDir)
 
 	// Log the command for debugging
-	logger.Warn("Running ripgrep: %s %v", rgPath, strings.Join(args, " "))
+	logger.Debug("Running ripgrep: %s %v", rgPath, strings.Join(args, " "))
 
 	// Check cancellation before starting expensive operation
 	select {
 	case <-cancelChan:
-		logger.Warn("Content search cancelled before execution")
+		logger.Info("Content search cancelled before execution")
 		return []Result{}, nil
 	default:
 	}
@@ -135,7 +135,7 @@ func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-c
 		case <-cancelChan:
 			if cmd.Process != nil {
 				cmd.Process.Kill()
-				logger.Warn("Content search cancelled during execution")
+				logger.Info("Content search cancelled during execution")
 			}
 		case <-done:
 		}
@@ -198,7 +198,7 @@ func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-c
 			switch exitErr.ExitCode() {
 			case 1:
 				// No matches - normal
-				logger.Warn("Content search complete: no matches in %v", time.Since(startTime))
+				logger.Info("Content search complete: no matches in %v", time.Since(startTime))
 				return results, nil
 			case 2:
 				stderr := stderrBuf.String()
@@ -216,7 +216,7 @@ func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-c
 		logger.Warn("Content search wait error: %v", waitErr)
 	}
 
-	logger.Warn("Content search complete: %d results in %v", len(results), time.Since(startTime))
+	logger.Info("Content search complete: %d results in %v", len(results), time.Since(startTime))
 	return results, nil
 }
 
@@ -260,7 +260,7 @@ func SubstringMatchNames(query string, names []string) []MatchResult {
 // customSkipDirs are user-configurable directories to skip (merged with hardcoded essentials)
 func RecursiveSearchFiles(query, currentDir string, showHidden bool, shouldIgnoreFn func(string) bool, cancelChan <-chan struct{}, onProgress func(scanned int), onResult func(Result, MatchResult), maxResults, maxDepth, maxFilesScanned int, customSkipDirs []string, nameOnly bool) ([]Result, []MatchResult) {
 
-	logger.Warn("Starting recursive search in %s for query '%s'", currentDir, query)
+	logger.Info("Starting recursive search in %s for query '%s'", currentDir, query)
 	startTime := time.Now()
 
 	lowerQuery := strings.ToLower(query)
@@ -280,7 +280,7 @@ func RecursiveSearchFiles(query, currentDir string, showHidden bool, shouldIgnor
 		// Check cancellation first (critical for responsiveness)
 		select {
 		case <-cancelChan:
-			logger.Warn("Recursive search cancelled after scanning %d files in %v", scannedCount, time.Since(startTime))
+			logger.Info("Recursive search cancelled after scanning %d files in %v", scannedCount, time.Since(startTime))
 			return filepath.SkipAll
 		default:
 		}
@@ -398,10 +398,10 @@ func RecursiveSearchFiles(query, currentDir string, showHidden bool, shouldIgnor
 	if permissionErrors > 0 {
 		logger.Warn("Scan complete: %d files scanned, %d dirs skipped, %d permission errors in %v", scannedCount, skippedDirs, permissionErrors, time.Since(startTime))
 	} else {
-		logger.Warn("Scan complete: %d files scanned, %d dirs skipped in %v", scannedCount, skippedDirs, time.Since(startTime))
+		logger.Info("Scan complete: %d files scanned, %d dirs skipped in %v", scannedCount, skippedDirs, time.Since(startTime))
 	}
 
-	logger.Warn("Recursive search complete: returned %d results", len(filteredFiles))
+	logger.Info("Recursive search complete: returned %d results", len(filteredFiles))
 	return filteredFiles, searchMatches
 }
 
