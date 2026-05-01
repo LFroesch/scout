@@ -46,7 +46,7 @@ jobs:
 
             out="${BINARY_NAME}-${os}-${arch}${ext}"
             echo "Building $out"
-            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "$out" "${BUILD_TARGET}"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "$out" "${BUILD_TARGET}"
           done
 
       - name: Generate checksums

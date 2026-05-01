@@ -13,9 +13,21 @@ import (
 	"github.com/LFroesch/scout/internal/logger"
 )
 
+var version = "dev"
+
 func main() {
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	rootFlag := flag.String("root", "", "restrict navigation to this directory (disables bookmarks outside it)")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "scout — TUI file explorer with vim keys, search, preview, bookmarks\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: scout [flags]\n\n")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("scout " + version)
+		os.Exit(0)
+	}
 
 	// Resolve to absolute path
 	var rootPath string
