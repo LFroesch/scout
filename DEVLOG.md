@@ -1,5 +1,17 @@
 ## DevLog
 
+### 2026-05-04 - WORK.md blocker audit
+- Audited `WORK.md` against the current codebase and removed stale search/keybind follow-up items that are now covered by implementation and tests
+- Narrowed the v1 checklist to real blockers still visible in code: sort persistence, dormant dual-pane/dead UI cleanup, optional dependency UX, and README/demo positioning
+- Replaced the raw external-search reminder with an actionable longer-term note about evaluating indexed search approaches only if the current walk-based model becomes a ceiling
+- Files: WORK.md, DEVLOG.md
+
+### 2026-04-30 - Product gap roadmap added
+- Added a concrete product-gap roadmap to `WORK.md` after comparing scout against `elio`
+- Reframed near-term priorities around search-first developer workflow, UI polish, README positioning, and removing unfinished-feeling surfaces before broadening scope
+- Captured a post-v1 mini-IDE direction: direct file editing in scout plus a clickable scrollbar / fast-jump affordance for large files
+- Files: WORK.md
+
 ### 2026-04-18 - Logging levels and coverage
 - Added `Info`/`Debug` levels and `SetLevel` to the logger; defaults to `Info`
 - `SCOUT_LOG_LEVEL=debug|info|warn|error` env var overrides at startup
