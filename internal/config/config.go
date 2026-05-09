@@ -19,6 +19,7 @@ type Config struct {
 	Bookmarks       []string          `json:"bookmarks"`
 	ShowHidden      bool              `json:"show_hidden"`
 	PreviewEnabled  bool              `json:"preview_enabled"`
+	SortMode        string            `json:"sort_mode"`
 	Frecency        map[string]int    `json:"frecency"`
 	LastVisited     map[string]string `json:"last_visited"` // path -> timestamp
 }
@@ -45,6 +46,7 @@ func Load() *Config {
 		Bookmarks:       []string{homeDir, "/mnt"},
 		ShowHidden:      false,
 		PreviewEnabled:  true,
+		SortMode:        "name",
 		Frecency:        make(map[string]int),
 		LastVisited:     make(map[string]string),
 		MaxResults:      5000,
@@ -74,6 +76,9 @@ func Load() *Config {
 	}
 	if config.LastVisited == nil {
 		config.LastVisited = make(map[string]string)
+	}
+	if config.SortMode == "" {
+		config.SortMode = defaultConfig.SortMode
 	}
 	// Initialize skip_directories with defaults if empty or nil
 	if config.SkipDirectories == nil || len(config.SkipDirectories) == 0 {

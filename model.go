@@ -170,12 +170,6 @@ type model struct {
 	clipboard            []string              // Files in clipboard
 	clipboardOp          operationType         // Copy or cut
 	sortBy               sortMode              // Current sort mode
-	dualPane             bool                  // Dual pane mode enabled
-	activePane           int                   // 0 = left, 1 = right
-	rightDir             string                // Right pane directory
-	rightFiles           []fileItem            // Right pane files
-	rightCursor          int                   // Right pane cursor
-	rightScrollOffset    int                   // Right pane scroll offset
 	contentSearchResults []contentSearchResult // Ripgrep search results
 	contentSearchCursor  int                   // Cursor in content search results
 	previewPending       bool                  // Preview update pending
@@ -217,15 +211,15 @@ type contentSearchResult struct {
 
 // Helper methods for safe dimensions
 func (m *model) getSafeWidth() int {
-	if m.width < minTerminalWidth {
-		return minTerminalWidth
+	if m.width < 1 {
+		return 1
 	}
 	return m.width
 }
 
 func (m *model) getSafeHeight() int {
-	if m.height < minTerminalHeight {
-		return minTerminalHeight
+	if m.height < 1 {
+		return 1
 	}
 	return m.height
 }
@@ -303,19 +297,63 @@ func initialModel(rootOverride string) model {
 		searchMatches:        [][]int{},
 		clipboard:            []string{},
 		clipboardOp:          opNone,
-		sortBy:               sortByName,
-		dualPane:             false,
-		activePane:           0,
-		rightDir:             currentDir,
-		rightFiles:           []fileItem{},
-		rightCursor:          0,
-		rightScrollOffset:    0,
+		sortBy:               parseSortMode(cfg.SortMode),
 		visitedDirs:          make(map[string]bool),
 		doubleClickThreshold: 400 * time.Millisecond,
 	}
 
 	m.loadFiles()
 	return m
+}
+
+func parseSortMode(raw string) sortMode {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "size":
+		return sortBySize
+	case "date":
+		return sortByDate
+	case "type":
+		return sortByType
+	default:
+		return sortByName
+	}
+}
+
+func (m *model) currentSortModeName() string {
+	switch m.sortBy {
+	case sortBySize:
+		return "size"
+	case sortByDate:
+		return "date"
+	case sortByType:
+		return "type"
+	default:
+		return "name"
+	}
+}
+
+func (m *model) persistSortMode() error {
+	m.config.SortMode = m.currentSortModeName()
+	return config.Save(m.config)
+}
+
+func nextSearchMode(current searchType, recursive bool, hasRipgrep bool) (searchType, bool, string) {
+	switch current {
+	case searchFilename:
+		if !recursive {
+			return searchFilename, true, "recursive file search"
+		}
+		if hasRipgrep {
+			return searchContent, false, "content search"
+		}
+		return searchUltra, false, "ripgrep missing; ultra search (all drives)"
+	case searchContent:
+		return searchUltra, false, "ultra search (all drives)"
+	case searchUltra:
+		return searchFilename, false, "current directory file search"
+	default:
+		return searchFilename, false, "current directory file search"
+	}
 }
 
 func (m *model) loadFiles() {

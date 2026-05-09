@@ -152,6 +152,17 @@ func MoveToTrash(path string) error {
 	}
 }
 
+func TrashAvailable() bool {
+	switch runtime.GOOS {
+	case "darwin":
+		return commandExists("osascript")
+	case "windows":
+		return commandExists("powershell")
+	default:
+		return commandExists("gio") || commandExists("trash-put")
+	}
+}
+
 // Delete deletes a file or directory (tries trash first, then permanent delete)
 func Delete(path string, isDir bool) error {
 	// Try to move to trash first
@@ -316,7 +327,6 @@ func RestoreFromTrash(undoInfoPath, originalPath string) error {
 
 	return nil
 }
-
 
 // Rename renames a file or directory
 func Rename(oldPath, newName string) error {

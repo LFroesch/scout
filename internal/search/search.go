@@ -13,6 +13,10 @@ import (
 	"github.com/LFroesch/scout/internal/logger"
 )
 
+func HasRipgrep() bool {
+	return commandExists("rg") || commandExists("ripgrep")
+}
+
 // Result represents a search result with path and display name
 type Result struct {
 	Path        string
@@ -84,7 +88,7 @@ func SearchFileContent(query, currentDir string, showHidden bool, cancelChan <-c
 		"--color=never",
 		fmt.Sprintf("--max-depth=%d", maxDepth),
 		fmt.Sprintf("--max-count=%d", maxResults),
-		"--max-filesize=1M",  // Skip files larger than 1MB (performance)
+		"--max-filesize=1M", // Skip files larger than 1MB (performance)
 	}
 
 	// Build ripgrep exclusions from the config skip list

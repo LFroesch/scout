@@ -7,24 +7,13 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/LFroesch/scout/internal/fileops"
 	"github.com/LFroesch/scout/internal/utils"
 )
 
 func (m *model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "loading..."
-	}
-
-	// Show helpful message for very small terminals
-	if m.width < minTerminalWidth || m.height < minTerminalHeight {
-		warningStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214")).
-			Bold(true).
-			Padding(1)
-		return warningStyle.Render(fmt.Sprintf(
-			"terminal too small: %dx%d\nminimum: %dx%d\n\nplease resize terminal or zoom out",
-			m.width, m.height, minTerminalWidth, minTerminalHeight,
-		))
 	}
 
 	var content string
@@ -42,13 +31,7 @@ func (m *model) View() string {
 	case modeHelp:
 		mainContent = m.renderHelpView()
 	default:
-		if m.dualPane {
-			// Dual pane mode
-			leftPane := m.renderFileList(m.width / 2)
-			// For now, right pane shows same directory
-			rightPane := m.renderFileList(m.width / 2)
-			mainContent = lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
-		} else if m.showPreview {
+		if m.showPreview {
 			// Split view with preview - ensure both panels have same height
 			availableHeight := m.height - uiOverhead
 			if availableHeight < 3 {
@@ -1110,11 +1093,19 @@ func (m model) renderConfirmFileDeleteView() string {
 	}
 
 	title := titleStyle.Render(fmt.Sprintf("DELETE %s?", strings.ToUpper(fileType)))
-	content := contentStyle.Render(fmt.Sprintf("are you sure you want to delete:\n\n%s\n\nthis will move it to trash if available.", file.name))
+	content := contentStyle.Render(fileDeleteMessage(file.name, fileops.TrashAvailable()))
 	prompt := promptStyle.Render("press 'y' to confirm, 'n' or esc to cancel")
 
 	dialog := title + "\n" + content + "\n" + prompt
 	return dialogStyle.Render(dialog)
+}
+
+func fileDeleteMessage(name string, trashAvailable bool) string {
+	action := "this will move it to trash if available."
+	if !trashAvailable {
+		action = "trash tool not available; this will be permanently deleted."
+	}
+	return fmt.Sprintf("are you sure you want to delete:\n\n%s\n\n%s", name, action)
 }
 
 func (m model) renderRenameDialog() string {

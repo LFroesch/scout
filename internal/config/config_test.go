@@ -34,6 +34,10 @@ func TestLoadDefaultConfig(t *testing.T) {
 	if cfg.ShowHidden {
 		t.Error("expected hidden files to be off by default")
 	}
+
+	if cfg.SortMode != "name" {
+		t.Errorf("expected default sort mode to be name, got %q", cfg.SortMode)
+	}
 }
 
 func TestSaveAndLoadConfig(t *testing.T) {
@@ -49,6 +53,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 		Bookmarks:      []string{"/test/path1", "/test/path2"},
 		ShowHidden:     true,
 		PreviewEnabled: false,
+		SortMode:       "date",
 		Frecency:       map[string]int{"/test/path1": 5},
 		LastVisited:    map[string]string{"/test/path1": "2026-01-09T12:00:00Z"},
 	}
@@ -73,6 +78,10 @@ func TestSaveAndLoadConfig(t *testing.T) {
 
 	if loadedCfg.PreviewEnabled != cfg.PreviewEnabled {
 		t.Errorf("PreviewEnabled mismatch: got %v, want %v", loadedCfg.PreviewEnabled, cfg.PreviewEnabled)
+	}
+
+	if loadedCfg.SortMode != cfg.SortMode {
+		t.Errorf("SortMode mismatch: got %s, want %s", loadedCfg.SortMode, cfg.SortMode)
 	}
 
 	// Note: bookmarks might have root path added, so check for minimum length

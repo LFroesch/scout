@@ -14,6 +14,7 @@ import (
 	"github.com/LFroesch/scout/internal/config"
 	"github.com/LFroesch/scout/internal/fileops"
 	"github.com/LFroesch/scout/internal/git"
+	"github.com/LFroesch/scout/internal/search"
 	"github.com/LFroesch/scout/internal/utils"
 )
 
@@ -39,15 +40,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Enforce minimum dimensions for small terminals
 		m.width = msg.Width
 		m.height = msg.Height
-		if m.width < minTerminalWidth {
-			m.width = minTerminalWidth
-		}
-		if m.height < minTerminalHeight {
-			m.height = minTerminalHeight
-		}
 
 		// Recalculate scroll positions for new height
 		if len(m.filteredFiles) > 0 {
@@ -968,6 +962,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Cycle through sort modes if locked, otherwise allow typing in search
 				if m.searchResultsLocked {
 					m.sortBy = (m.sortBy + 1) % 4
+					if err := m.persistSortMode(); err != nil {
+						m.showError("CONFIG SAVE FAILED", fmt.Sprintf("failed to save sort mode: %v", err))
+						return m, nil
+					}
 					// Re-sort the filtered files
 					m.sortSearchResults()
 					sortNames := map[sortMode]string{
@@ -1244,35 +1242,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
-				// Cycle through search modes: Current Dir -> Recursive -> Content -> Ultra -> Current Dir
-				switch m.currentSearchType {
-				case searchFilename:
-					if !m.recursiveSearch {
-						// Mode 1 -> Mode 2: Current Dir -> Recursive
-						m.recursiveSearch = true
-						m.statusMsg = "recursive file search"
-					} else {
-						// Mode 2 -> Mode 3: Recursive -> Content
-						m.currentSearchType = searchContent
-						m.recursiveSearch = false
-						m.statusMsg = "content search"
-					}
-				case searchContent:
-					// Mode 3 -> Mode 4: Content -> Ultra
-					m.currentSearchType = searchUltra
-					m.recursiveSearch = false
-					m.statusMsg = "ultra search (all drives)"
-				case searchUltra:
-					// Mode 4 -> Mode 1: Ultra -> Current Dir
-					m.currentSearchType = searchFilename
-					m.recursiveSearch = false
-					m.statusMsg = "current directory file search"
-				default:
-					// Fallback: reset to current dir
-					m.currentSearchType = searchFilename
-					m.recursiveSearch = false
-					m.statusMsg = "current directory file search"
-				}
+				m.currentSearchType, m.recursiveSearch, m.statusMsg = nextSearchMode(
+					m.currentSearchType,
+					m.recursiveSearch,
+					search.HasRipgrep(),
+				)
 				m.statusExpiry = time.Now().Add(2 * time.Second)
 				cmd = m.updateFilter()
 				m.updatePreview()
@@ -2423,6 +2397,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "S":
 				// Cycle through sort modes: Name → Size → Date → Type → Name...
 				m.sortBy = (m.sortBy + 1) % 4
+				if err := m.persistSortMode(); err != nil {
+					m.showError("CONFIG SAVE FAILED", fmt.Sprintf("failed to save sort mode: %v", err))
+					return m, nil
+				}
 				m.sortFiles()
 
 			case "?":
