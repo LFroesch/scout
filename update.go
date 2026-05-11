@@ -1821,12 +1821,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, cmd
 
-			case "?":
-				// Show help (works both locked and unlocked - does not type)
-				m.previousMode = modeSearch
-				m.mode = modeHelp
-				return m, nil
-
 			case "ctrl+f":
 				// Full-page down when locked
 				if m.searchResultsLocked {

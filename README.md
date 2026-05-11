@@ -1,6 +1,8 @@
 # scout
 
-Terminal file explorer with preview, search, bookmarks, and basic file operations. `scout` is meant to stay fast and keyboard-first without giving up the everyday actions you usually leave the shell for.
+Terminal file explorer with preview, search, bookmarks, and basic file operations. `scout` is meant to stay fast and keyboard-first without giving up the everyday file actions that usually push you out of the shell.
+
+![scout hero screenshot](assets/screenshots/hero.png)
 
 ## Install
 
