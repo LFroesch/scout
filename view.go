@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/LFroesch/scout/internal/fileops"
 	"github.com/LFroesch/scout/internal/utils"
@@ -82,18 +83,11 @@ func (m *model) View() string {
 
 func (m model) renderHeader() string {
 	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("99")).
 		Background(lipgloss.Color("235")).
 		Padding(0, 1).
 		Width(m.width)
 
-	var title string
-	if m.mode == modeBookmarks {
-		title = fmt.Sprintf("🔍 scout %s - bookmarks (esc to exit)", version)
-	} else {
-		title = fmt.Sprintf("🔍 scout %s - %s", version, m.currentDir)
-	}
+	title := m.renderHeaderTitle()
 
 	// Show search query only when in search mode
 	if m.mode == modeSearch {
@@ -215,26 +209,16 @@ func (m model) renderHeader() string {
 		if searchTextLen+22 <= m.width {
 			// Enough room: title on left, search on right
 			titleWidth := m.width - searchTextLen - 2
-			// Truncate the title path to fit
-			titleRunes := []rune(title)
 			if lipgloss.Width(title) > titleWidth-2 {
-				// Right-truncate the path
-				truncated := ""
-				for _, r := range titleRunes {
-					if lipgloss.Width(truncated+string(r)+"...") > titleWidth-2 {
-						break
-					}
-					truncated += string(r)
-				}
-				title = truncated + "..."
+				title = xansi.Truncate(title, titleWidth-2, "...")
 			}
 
 			baseStyle := lipgloss.NewStyle().
-				Bold(true).
 				Background(lipgloss.Color("235")).
-				Foreground(lipgloss.Color("99"))
+				Width(titleWidth).
+				Padding(0, 1)
 
-			titlePart := baseStyle.Width(titleWidth).Padding(0, 1).Render(title)
+			titlePart := baseStyle.Render(title)
 			title = lipgloss.JoinHorizontal(lipgloss.Top, titlePart, searchText)
 		} else {
 			// Not enough room — search bar is the entire header
@@ -242,15 +226,29 @@ func (m model) renderHeader() string {
 		}
 
 		return lipgloss.NewStyle().
-			Bold(true).
 			Background(lipgloss.Color("235")).
-			Foreground(lipgloss.Color("99")).
 			Width(m.width).
 			MaxWidth(m.width).
 			MaxHeight(1).
 			Render(title)
 	}
 	return titleStyle.Render(title)
+}
+
+func (m model) renderHeaderTitle() string {
+	baseStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("99")).
+		Background(lipgloss.Color("235"))
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")).
+		Background(lipgloss.Color("235"))
+
+	title := baseStyle.Render("🔍 scout") + dimStyle.Render(" "+version)
+	if m.mode == modeBookmarks {
+		return title + baseStyle.Render(" - bookmarks (esc to exit)")
+	}
+	return title + baseStyle.Render(" - " + m.currentDir)
 }
 
 func (m *model) renderStatusBar() string {

@@ -100,7 +100,7 @@ func (m *model) execEditor(path string, line int) tea.Cmd {
 		m.statusExpiry = time.Now().Add(3 * time.Second)
 		return nil
 	}
-	m.statusMsg = fmt.Sprintf("opening %s in %s", filename, editor)
+	m.statusMsg = fmt.Sprintf("opening %s in editor", filename)
 	m.statusExpiry = time.Now().Add(2 * time.Second)
 	return nil
 }
