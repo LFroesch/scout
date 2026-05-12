@@ -90,9 +90,9 @@ func (m model) renderHeader() string {
 
 	var title string
 	if m.mode == modeBookmarks {
-		title = "🔍 scout - bookmarks (esc to exit)"
+		title = fmt.Sprintf("🔍 scout %s - bookmarks (esc to exit)", version)
 	} else {
-		title = fmt.Sprintf("🔍 scout - %s", m.currentDir)
+		title = fmt.Sprintf("🔍 scout %s - %s", version, m.currentDir)
 	}
 
 	// Show search query only when in search mode
