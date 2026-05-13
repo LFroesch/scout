@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/LFroesch/tui-suite/suitechrome"
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 
@@ -82,11 +83,6 @@ func (m *model) View() string {
 }
 
 func (m model) renderHeader() string {
-	titleStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("235")).
-		Padding(0, 1).
-		Width(m.width)
-
 	title := m.renderHeaderTitle()
 
 	// Show search query only when in search mode
@@ -94,17 +90,14 @@ func (m model) renderHeader() string {
 		// Build search parts with different colors
 		purpleStyle := lipgloss.NewStyle().
 			Bold(true).
-			Background(lipgloss.Color("235")).
 			Foreground(lipgloss.Color("214"))
 
 		grayStyle := lipgloss.NewStyle().
 			Bold(true).
-			Background(lipgloss.Color("235")).
 			Foreground(lipgloss.Color("252"))
 
 		yellowStyle := lipgloss.NewStyle().
 			Bold(true).
-			Background(lipgloss.Color("235")).
 			Foreground(lipgloss.Color("226"))
 
 		// Pick search mode label based on available width
@@ -212,39 +205,21 @@ func (m model) renderHeader() string {
 			if lipgloss.Width(title) > titleWidth-2 {
 				title = xansi.Truncate(title, titleWidth-2, "...")
 			}
-
-			baseStyle := lipgloss.NewStyle().
-				Background(lipgloss.Color("235")).
-				Width(titleWidth).
-				Padding(0, 1)
-
-			titlePart := baseStyle.Render(title)
-			title = lipgloss.JoinHorizontal(lipgloss.Top, titlePart, searchText)
+			return suitechrome.JoinHeader(m.width, title, searchText)
 		} else {
 			// Not enough room — search bar is the entire header
-			title = searchText
+			return searchText
 		}
-
-		return lipgloss.NewStyle().
-			Background(lipgloss.Color("235")).
-			Width(m.width).
-			MaxWidth(m.width).
-			MaxHeight(1).
-			Render(title)
 	}
-	return titleStyle.Render(title)
+	return title
 }
 
 func (m model) renderHeaderTitle() string {
 	baseStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("99")).
-		Background(lipgloss.Color("235"))
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Background(lipgloss.Color("235"))
+		Foreground(lipgloss.Color("99"))
 
-	title := baseStyle.Render("🔍 scout") + dimStyle.Render(" "+version)
+	title := suitechrome.RenderTitle("scout", version)
 	if m.mode == modeBookmarks {
 		return title + baseStyle.Render(" - bookmarks (esc to exit)")
 	}
@@ -252,28 +227,22 @@ func (m model) renderHeaderTitle() string {
 }
 
 func (m *model) renderStatusBar() string {
-	// Normal status bar
-	statusStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("255")).
-		Background(lipgloss.Color("235")).
-		Padding(0, 1).
-		Width(m.width)
-
 	// Style for purple numbers and keybinds (inline to avoid vertical stacking)
 	purpleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("99")).
-		Background(lipgloss.Color("235")).
+		Foreground(lipgloss.Color("117")).
 		Bold(true).
 		Inline(true)
 
 	// Style for white text values
 	whiteStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("255")).
-		Background(lipgloss.Color("235")).
+		Foreground(lipgloss.Color("230")).
 		Inline(true)
 
 	var statusText string
 	var rightSide string
+	actions := func(items ...suitechrome.Action) string {
+		return suitechrome.RenderActions(items)
+	}
 
 	// Bookmark mode has special status bar
 	if m.mode == modeBookmarks {
@@ -284,10 +253,19 @@ func (m *model) renderStatusBar() string {
 			statusText = whiteStyle.Render("no bookmarks")
 		}
 		// Show keybinds on right
-		rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": open | ") + purpleStyle.Render("o") + whiteStyle.Render(": vs code | ") + purpleStyle.Render("d") + whiteStyle.Render(": delete | ") + purpleStyle.Render("esc") + whiteStyle.Render(": back")
+		rightSide = actions(
+			suitechrome.Action{Key: "enter", Label: "open"},
+			suitechrome.Action{Key: "o", Label: "vs code"},
+			suitechrome.Action{Key: "d", Label: "delete"},
+			suitechrome.Action{Key: "esc", Label: "back"},
+		)
 	} else if m.mode == modeHelp {
 		statusText = whiteStyle.Render("help")
-		rightSide = purpleStyle.Render("j/k") + whiteStyle.Render(": scroll | ") + purpleStyle.Render("g/G") + whiteStyle.Render(": top/bottom | ") + purpleStyle.Render("q/esc") + whiteStyle.Render(": close")
+		rightSide = actions(
+			suitechrome.Action{Key: "j/k", Label: "scroll"},
+			suitechrome.Action{Key: "g/G", Label: "top/bottom"},
+			suitechrome.Action{Key: "q/esc", Label: "close"},
+		)
 	} else {
 		// File count and position info
 		if len(m.filteredFiles) > 0 {
@@ -325,7 +303,7 @@ func (m *model) renderStatusBar() string {
 			statusText += whiteStyle.Render(" | " + m.statusMsg)
 		} else if m.loading {
 			// Fallback loading indicator if statusMsg is not set
-			orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Background(lipgloss.Color("235")).Bold(true).Inline(true)
+			orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("117")).Bold(true).Inline(true)
 			if m.scannedFiles > 0 {
 				statusText += whiteStyle.Render(" | ") + orangeStyle.Render("searching... ") + whiteStyle.Render("(") + purpleStyle.Render(fmt.Sprintf("%d", m.scannedFiles)) + whiteStyle.Render(" files scanned)")
 			} else {
@@ -346,54 +324,56 @@ func (m *model) renderStatusBar() string {
 		if len(m.filteredFiles) > 0 && m.cursor < len(m.filteredFiles) {
 			selected := m.filteredFiles[m.cursor]
 			if m.width < 90 {
-				rightSide = purpleStyle.Render("?") + whiteStyle.Render(" help")
+				rightSide = actions(suitechrome.Action{Key: "?", Label: "help"})
 			} else if m.mode == modeSearch && m.searchResultsLocked {
 				// Search mode (locked): enter navigates for both dirs and files
 				if selected.isDir {
-					rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": go to | ") + purpleStyle.Render("o") + whiteStyle.Render(": editor | ") + purpleStyle.Render("?") + whiteStyle.Render(" for help")
+					rightSide = actions(
+						suitechrome.Action{Key: "enter", Label: "go to"},
+						suitechrome.Action{Key: "o", Label: "editor"},
+						suitechrome.Action{Key: "?", Label: "help"},
+					)
 				} else {
-					rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": go to | ") + purpleStyle.Render("o") + whiteStyle.Render(": open | ") + purpleStyle.Render("?") + whiteStyle.Render(" for help")
+					rightSide = actions(
+						suitechrome.Action{Key: "enter", Label: "go to"},
+						suitechrome.Action{Key: "o", Label: "open"},
+						suitechrome.Action{Key: "?", Label: "help"},
+					)
 				}
 			} else if selected.name == ".." {
-				rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": back | ") + purpleStyle.Render("?") + whiteStyle.Render(" for help")
+				rightSide = actions(
+					suitechrome.Action{Key: "enter", Label: "back"},
+					suitechrome.Action{Key: "?", Label: "help"},
+				)
 			} else if selected.isDir {
-				rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": open | ") + purpleStyle.Render("o") + whiteStyle.Render(": vs code | ") + purpleStyle.Render("?") + whiteStyle.Render(" for help")
+				rightSide = actions(
+					suitechrome.Action{Key: "enter", Label: "open"},
+					suitechrome.Action{Key: "o", Label: "vs code"},
+					suitechrome.Action{Key: "?", Label: "help"},
+				)
 			} else {
-				rightSide = purpleStyle.Render("enter") + whiteStyle.Render(": open | ") + purpleStyle.Render("o") + whiteStyle.Render(": editor | ") + purpleStyle.Render("f") + whiteStyle.Render(": parent dir | ") + purpleStyle.Render("?") + whiteStyle.Render(" for help")
+				rightSide = actions(
+					suitechrome.Action{Key: "enter", Label: "open"},
+					suitechrome.Action{Key: "o", Label: "editor"},
+					suitechrome.Action{Key: "f", Label: "parent dir"},
+					suitechrome.Action{Key: "?", Label: "help"},
+				)
 			}
 		} else {
 			rightSide = purpleStyle.Render("?") + whiteStyle.Render(" for help")
 		}
 	}
 
-	totalWidth := m.width - 2 // Account for padding
-	leftWidth := lipgloss.Width(statusText)
-	rightWidth := lipgloss.Width(rightSide)
-	padding := totalWidth - leftWidth - rightWidth - 3
-
-	// If not enough room for right side, truncate or hide it
-	if padding < 1 {
-		// Try showing just "? help" as minimal right side
-		minRight := purpleStyle.Render("?") + whiteStyle.Render(" help")
-		minRightWidth := lipgloss.Width(minRight)
-		minPadding := totalWidth - leftWidth - minRightWidth - 3
-		if minPadding >= 1 {
+	totalWidth := m.width - 2
+	if lipgloss.Width(statusText)+lipgloss.Width(rightSide)+2 > totalWidth {
+		minRight := actions(suitechrome.Action{Key: "?", Label: "help"})
+		if lipgloss.Width(statusText)+lipgloss.Width(minRight)+2 <= totalWidth {
 			rightSide = minRight
-			padding = minPadding
 		} else {
-			// No room at all — drop right side entirely
 			rightSide = ""
-			padding = totalWidth - leftWidth - 3
-			if padding < 0 {
-				padding = 0
-			}
 		}
 	}
-	if rightSide != "" {
-		statusText += strings.Repeat(whiteStyle.Render(" "), padding) + rightSide
-	}
-
-	return statusStyle.Render(statusText)
+	return suitechrome.JoinLine(m.width, statusText, rightSide)
 }
 
 // renderFileList renders the file list panel with the given width
