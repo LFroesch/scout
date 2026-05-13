@@ -20,7 +20,7 @@ detect_platform() {
   case "$(uname -s)" in
     Linux*) os="linux" ;;
     Darwin*) os="darwin" ;;
-    MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+    MINGW*|MSYS*|CYGWIN*) error "install.sh supports Linux and macOS only." ;;
     *) error "Unsupported OS: $(uname -s)" ;;
   esac
 
@@ -68,11 +68,7 @@ main() {
   version="${VERSION:-$(get_latest_version)}"
   [ -n "$version" ] || error "Unable to resolve release version"
 
-  if [[ "$platform" == windows* ]]; then
-    binary_file="${BINARY_NAME}-${platform}.exe"
-  else
-    binary_file="${BINARY_NAME}-${platform}"
-  fi
+  binary_file="${BINARY_NAME}-${platform}"
 
   base_url="https://github.com/${REPO}/releases/download/${version}"
 

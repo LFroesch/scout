@@ -8,19 +8,14 @@ Terminal file explorer with preview, search, bookmarks, and basic file operation
 
 ## Install
 
-Supported platforms: Linux, macOS, and Windows.
+Supported platforms: Linux and macOS.
+
+Windows release binaries and installer entrypoints are shipped, but native Windows support is unverified.
 
 Recommended:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LFroesch/scout/main/install.sh | bash
-```
-
-Other options:
-
-```bash
-go install github.com/LFroesch/scout@latest
-make install
 ```
 
 Windows:
@@ -31,6 +26,13 @@ Windows:
 
 ```bat
 install.cmd
+```
+
+Other options:
+
+```bash
+go install github.com/LFroesch/scout@latest
+make install
 ```
 
 Run:
