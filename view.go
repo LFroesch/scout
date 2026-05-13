@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/LFroesch/tui-suite/suitechrome"
+	"github.com/LFroesch/scout/suitechrome"
 	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 
